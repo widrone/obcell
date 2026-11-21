@@ -1,0 +1,13 @@
+# Take an Obcell back to a clean Ubuntu: stop the cell, back up, then remove everything
+# site.yml installed (containers, volumes, images, packages, repos, services, files, logs).
+#   ansible-playbook reset.yml --limit <host> --check                             # preview, changes nothing
+#   ansible-playbook reset.yml --limit <host> -e obcell_reset_confirm=<host>      # do it
+# Options (-e name=value): see roles/reset/defaults/main.yml.
+- name: Reset an Obcell to a clean Ubuntu
+  hosts: obcell
+  become: true
+  pre_tasks:
+    - name: Right machine?
+      ansible.builtin.import_tasks: tasks/right_host.yml
+  roles:
+    - role: reset

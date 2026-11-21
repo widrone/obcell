@@ -1,0 +1,300 @@
+# Take an Obcell back to a clean Ubuntu: undo what site.yml installed, plus its data and logs.
+# Kept on purpose: the base tools (git, curl, build-essential, avahi, iptables-persistent...),
+# the hostname, the Obcell user, and by default Tailscale and ~/obcell-backups.
+
+# ---------------------------------------------------------------- what is there (also in --check)
+- name: Installed packages
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, "-f=${Package} ${Status}\n"]
+  register: _dpkg
+  changed_when: false
+  check_mode: false
+
+- name: Existing Obcell files and folders
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+  loop: "{{ (reset_home_paths | map('regex_replace', '^', obcell_home ~ '/') | list) + reset_system_paths
+            + (reset_docker_paths if reset_remove_docker | bool else []) }}"
+  register: _paths
+  check_mode: false
+
+- name: Docker, the obcell CLI and the stack files present?
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+  loop: "{{ ['/usr/bin/docker', obcell_home ~ '/obcell/obcell'] + (reset_stacks | map('regex_replace', '^', obcell_home ~ '/') | map('regex_replace', '$', '/compose.yml') | list) }}"
+  register: _markers
+  check_mode: false
+
+- name: What will be removed
+  ansible.builtin.set_fact:
+    _installed: "{{ _dpkg.stdout_lines | select('search', ' install ok installed$') | map('regex_replace', ' .*', '') | list }}"
+    _existing: "{{ _paths.results | selectattr('stat.exists') | map(attribute='item') | list }}"
+    _present: "{{ _markers.results | selectattr('stat.exists') | map(attribute='item') | list }}"
+
+- name: Packages to purge
+  ansible.builtin.set_fact:
+    _purge: >-
+      {{ (_installed | select('match', '^(open5gs|mongodb-)') | list)
+         + (_installed | intersect(['nodejs'] + reset_sdr_packages + reset_build_deps))
+         + (_installed | intersect(reset_docker_packages) if reset_remove_docker | bool else [])
+         + (_installed | intersect(['tailscale']) if reset_remove_tailscale | bool else []) }}
+
+- name: Preview
+  ansible.builtin.debug:
+    msg:
+      - "Packages to purge ({{ _purge | length }}): {{ _purge | join(' ') }}"
+      - "Files/folders to delete ({{ _existing | length }}): {{ _existing | join(' ') }}"
+      - "Docker stacks to take down with their volumes and images: {{ reset_stacks | join(', ') }}"
+      - "Backup first: {{ reset_backup }} · keep ~/obcell-backups: {{ reset_keep_backups }} · remove Docker: {{ reset_remove_docker }}"
+      - "Remove Tailscale: {{ reset_remove_tailscale }} · clear the system journal: {{ reset_clear_journal }} · forget host on controller: {{ reset_forget_host }}"
+
+- name: Confirmed?
+  ansible.builtin.assert:
+    that: obcell_reset_confirm | default('') == inventory_hostname
+    fail_msg: >-
+      This DELETES the Obcell '{{ inventory_hostname }}': everything above, including subscribers (SIM
+      keys), productions, dashboards and logs. To go ahead, add -e obcell_reset_confirm={{ inventory_hostname }}
+    quiet: true
+  when: not ansible_check_mode
+
+# ---------------------------------------------------------------- stop, then back up
+- name: Stop the gNB, on-air control and WebUI
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop: ["{{ gnb_unit }}", "{{ control_unit }}", open5gs-webui]
+  failed_when: false
+
+- name: Backup (obcell backup -> ~/obcell-backups)
+  ansible.builtin.command: "{{ obcell_home }}/obcell/obcell backup"
+  environment:
+    HOME: "{{ obcell_home }}"
+  when: reset_backup | bool and (obcell_home ~ '/obcell/obcell') in _present
+  register: _backup
+  changed_when: true
+
+- name: Backup belongs to the Obcell user
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/obcell-backups"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    recurse: true
+  when: _backup is changed
+
+# ---------------------------------------------------------------- containers
+- name: Take the stacks down (containers, volumes, images, networks)
+  ansible.builtin.command:
+    cmd: docker compose down --volumes --rmi all --remove-orphans
+    chdir: "{{ obcell_home }}/{{ item }}"
+  loop: "{{ reset_stacks }}"
+  when: "'/usr/bin/docker' in _present and (obcell_home ~ '/' ~ item ~ '/compose.yml') in _present"
+  changed_when: true
+
+- name: Leftover build cache
+  ansible.builtin.command: docker builder prune --all --force
+  when: "'/usr/bin/docker' in _present and not reset_remove_docker | bool"
+  changed_when: true
+
+# ---------------------------------------------------------------- Tailscale (opt-in)
+- name: Leave the tailnet
+  ansible.builtin.command: tailscale logout
+  when: reset_remove_tailscale | bool and 'tailscale' in _installed
+  failed_when: false
+  changed_when: true
+
+# ---------------------------------------------------------------- packages
+- name: Stop MongoDB and Docker before purging
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+  loop: "{{ ['mongod'] + (['docker.socket', 'docker', 'containerd'] if reset_remove_docker | bool else []) }}"
+  failed_when: false
+
+- name: Purge packages
+  ansible.builtin.apt:
+    name: "{{ _purge }}"
+    state: absent
+    purge: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+  when: _purge | length > 0
+
+- name: PPA and vendor repository files (Open5GS, MyriadRF, MongoDB)
+  ansible.builtin.find:
+    paths: [/etc/apt/sources.list.d, /etc/apt/trusted.gpg.d, /usr/share/keyrings]
+    patterns: ["open5gs-*", "ppa_open5gs_*", "myriadrf-*", "ppa_myriadrf_*", "mongodb-*"]
+  register: _repo_files
+  check_mode: false
+
+- name: Remove repository files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ (_repo_files.files | map(attribute='path') | list)
+            + (reset_tailscale_paths if reset_remove_tailscale | bool else []) }}"
+
+# On 22.04 Ansible's apt_repository stores a PPA's key in the shared legacy keyring
+# /etc/apt/trusted.gpg. Launchpad says which key signs each PPA, so remove exactly that one.
+- name: Legacy apt keyring present?
+  ansible.builtin.stat:
+    path: /etc/apt/trusted.gpg
+  register: _legacy_keyring
+  check_mode: false
+
+- name: Signing keys of the PPAs (from Launchpad)
+  ansible.builtin.uri:
+    url: "https://api.launchpad.net/1.0/~{{ item.split('/')[0] }}/+archive/ubuntu/{{ item.split('/')[1] }}"
+    return_content: true
+  loop: ["{{ open5gs_ppa }}", myriadrf/drivers]
+  register: _ppa_info
+  failed_when: false
+  check_mode: false
+  when: _legacy_keyring.stat.exists
+
+- name: Remove the PPA keys from the legacy keyring
+  ansible.builtin.shell: >-
+    gpg --no-default-keyring --keyring /etc/apt/trusted.gpg --list-keys {{ item }} >/dev/null 2>&1
+    && gpg --no-default-keyring --keyring /etc/apt/trusted.gpg --batch --yes --delete-keys {{ item }}
+    && echo removed
+  loop: "{{ _ppa_info.results | default([]) | selectattr('json', 'defined') | map(attribute='json.signing_key_fingerprint') | select | list }}"
+  register: _key_del
+  changed_when: "'removed' in _key_del.stdout"
+  failed_when: false
+
+# ---------------------------------------------------------------- files, services, users
+- name: Delete Obcell files and folders
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ _existing }}"
+
+- name: ~/.local/bin and ~/.local, if nothing else is in them
+  ansible.builtin.command: rmdir {{ obcell_home }}/.local/bin {{ obcell_home }}/.local
+  register: _rmdir
+  changed_when: _rmdir.rc == 0
+  failed_when: false
+
+- name: Backups
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/obcell-backups"
+    state: absent
+  when: not reset_keep_backups | bool
+
+- name: On-air control service user
+  ansible.builtin.user:
+    name: "{{ control_user }}"
+    state: absent
+    remove: true
+
+- name: Users and groups left by the purged packages
+  ansible.builtin.shell: "getent {{ item.db }} {{ item.name }} >/dev/null && {{ item.cmd }} {{ item.name }}"
+  loop:
+    - {db: passwd, cmd: userdel, name: open5gs}
+    - {db: passwd, cmd: userdel, name: mongodb}
+    - {db: group, cmd: groupdel, name: open5gs}
+    - {db: group, cmd: groupdel, name: mongodb}
+    - {db: group, cmd: groupdel, name: docker, when: "{{ reset_remove_docker | bool }}"}
+  loop_control:
+    label: "{{ item.cmd }} {{ item.name }}"
+  when: item.when | default(true) | bool
+  register: _accounts
+  changed_when: _accounts.rc == 0
+  failed_when: false
+
+- name: Phones' tunnel interface (ogstun)
+  ansible.builtin.command: ip link delete ogstun
+  register: _ogstun
+  changed_when: _ogstun.rc == 0
+  failed_when: false
+
+- name: NAT rule for the phones
+  ansible.builtin.iptables:
+    table: nat
+    chain: POSTROUTING
+    source: "{{ ue_pool_v4 }}"
+    out_interface: "!ogstun"
+    jump: MASQUERADE
+    state: absent
+
+- name: IP forwarding back to the Ubuntu default (live value resets at the next boot)
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    state: absent
+    reload: false
+
+- name: mDNS on every interface again (Ubuntu default)
+  ansible.builtin.lineinfile:
+    path: /etc/avahi/avahi-daemon.conf
+    regexp: '^allow-interfaces='
+    line: "#allow-interfaces=eth0"
+  register: _avahi
+  failed_when: false
+
+- name: Restart avahi
+  ansible.builtin.systemd:
+    name: avahi-daemon
+    state: restarted
+  when: _avahi is changed
+
+- name: Forget removed units
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Reload udev rules
+  ansible.builtin.command: udevadm control --reload-rules
+  changed_when: false
+
+# ---------------------------------------------------------------- apt tidy-up
+# Two tasks: given update_cache and no package names, the apt module refreshes and skips autoremove.
+- name: Remove packages nothing needs any more (dependencies of what was purged)
+  ansible.builtin.apt:
+    autoremove: true
+    purge: true
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Refresh the package lists (the removed repositories drop out)
+  ansible.builtin.apt:
+    update_cache: true
+
+# ---------------------------------------------------------------- logs
+- name: Radio logs and packet captures in /tmp
+  ansible.builtin.find:
+    paths: /tmp
+    patterns: "{{ reset_log_patterns }}"
+  register: _logs
+  check_mode: false
+
+- name: Delete them
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ _logs.files | map(attribute='path') | list }}"
+
+- name: Empty the systemd journal
+  ansible.builtin.shell: journalctl --rotate && journalctl --vacuum-time=1s
+  when: reset_clear_journal | bool
+  changed_when: true
+
+# ---------------------------------------------------------------- controller side (opt-in)
+- name: Forget this host on the controller (secrets and inventory files)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ obcell_secrets_dir }}"
+    - "{{ playbook_dir }}/inventory/{{ inventory_hostname }}.yml"
+    - "{{ playbook_dir }}/inventory/host_vars/{{ inventory_hostname }}"
+  delegate_to: localhost
+  become: false
+  when: reset_forget_host | bool
+
+- name: Done
+  ansible.builtin.debug:
+    msg:
+      - "{{ inventory_hostname }} is back to a clean Ubuntu. Reboot to clear what still lives in memory (sudo reboot)."
+      - "{{ 'Backup: ' ~ obcell_home ~ '/obcell-backups (restore with restore.yml after site.yml)' if reset_keep_backups | bool else 'Backups deleted.' }}"
+      - "Kept: base tools, the hostname, {{ 'Tailscale, ' if not reset_remove_tailscale | bool else '' }}this repo, its venv{{ '' if reset_forget_host | bool else ' and secrets/' ~ inventory_hostname }}."

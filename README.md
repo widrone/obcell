@@ -105,6 +105,30 @@ obcell backup          # subscribers, productions, configs and the CA -> ~/obcel
   This brings back the SIM subscribers, the Open Live productions and the Caddy root CA,
   so phones and laptops keep trusting the Obcell.
 
+## Back to a clean state
+
+`reset.yml` undoes everything the build did: it stops the cell, takes an `obcell backup`, then
+removes the containers with their data and images, Open5GS, MongoDB, Node.js, Docker, the SDR
+drivers, the gNB and srsUE sources, the apt repositories and keys, the services, users and
+config files, and the logs.
+
+```bash
+ansible-playbook reset.yml --limit <host> --check                          # preview: lists what would go
+ansible-playbook reset.yml --limit <host> -e obcell_reset_confirm=<host>   # do it, then: sudo reboot
+```
+
+- **It asks for proof.** Without `-e obcell_reset_confirm=<host>` it stops before changing
+  anything. All SIM subscribers, productions and dashboards on the box are deleted.
+- **Kept:** the backup in `~/obcell-backups` (rebuild with `site.yml`, then `restore.yml`), the
+  base tools (git, curl, build-essential, avahi, iptables-persistent), the hostname, Tailscale
+  (so a remote box stays reachable), this repo, its venv and `secrets/<host>/`.
+- **Options** (`-e name=value`, all in `roles/reset/defaults/main.yml`):
+  `reset_remove_tailscale=true` (leaves the tailnet: only when you are at the box),
+  `reset_keep_backups=false`, `reset_remove_docker=false`,
+  `reset_clear_journal=false` (by default the whole systemd journal is emptied),
+  `reset_forget_host=true` (also deletes `secrets/<host>/` and the inventory files).
+- **Afterwards,** to remove the repo too: `rm -rf ~/obcell-src ~/.local/share/obcell-ansible`.
+
 ## Testing changes
 
 Changes are tested in throw-away LXD containers on a separate **test machine**, never on a
@@ -130,6 +154,7 @@ what they found.
 
 ```
 site.yml              builds an Obcell (all roles, in order)
+reset.yml             takes an Obcell back to a clean Ubuntu (asks for proof first)
 verify.yml            read-only health check
 restore.yml           puts data back from an `obcell backup` archive
 inventory/            your Obcells (git-ignored, written by install.sh) + host_vars/example

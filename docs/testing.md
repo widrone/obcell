@@ -80,6 +80,24 @@ tests/lxd/run.sh 24.04 destroy
 Environment: `OBCELL_TEST_CPUS` (LXD `limits.cpu`, e.g. `4` or `2-5`; default all),
 `OBCELL_TEST_MEM` (default `8GiB`), `OBCELL_ANSIBLE_VENV`.
 
+## Testing reset.yml
+
+`reset.yml` should leave a box like a fresh Ubuntu plus the base tools. To check that, compare
+a fresh container with the same container after install + reset:
+
+1. `tests/lxd/run.sh 22.04 destroy`, then `tests/lxd/run.sh 22.04 up`; record the state
+   (installed packages, apt sources and keys, users, groups, unit files, `/etc` entries, links).
+2. Install (a partial install is enough: `tests/lxd/run.sh 22.04 --tags base,docker,core,sdr,cli,control`;
+   `verify.yml` then fails on the missing gNB, which is expected), and start some Docker stack.
+3. `ansible-playbook -i tests/lxd/inventory.yml --limit obcell-jammy reset.yml -e obcell_reset_confirm=obcell-jammy`,
+   then `lxc restart obcell-jammy`, and record the state again.
+
+Last run (2026-11-21, 22.04): nothing from the fresh state was missing. What was left is
+the base role's packages (kept on purpose), `/etc/iptables/rules.v6` from iptables-persistent,
+the avahi line commented out again, and `~/obcell-backups`. A second `reset.yml` on the reset box
+runs clean. snapd fails in these containers after any reboot, reset or not, because the test
+container hides AppArmor (see below).
+
 ## What the test containers need (and why)
 
 The containers are unprivileged with nesting. Docker 29 inside LXD needs these, and

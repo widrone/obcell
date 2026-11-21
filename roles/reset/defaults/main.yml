@@ -1,0 +1,53 @@
+# reset.yml: take an Obcell back to a clean Ubuntu. Override with -e name=value.
+# Nothing happens without -e obcell_reset_confirm=<inventory name>; --check only previews.
+reset_backup: true              # run "obcell backup" first (archive in ~/obcell-backups)
+reset_keep_backups: true        # keep ~/obcell-backups (false: delete it too)
+reset_remove_docker: true       # purge Docker and everything in /var/lib/docker
+reset_remove_tailscale: false   # log out of the tailnet and purge Tailscale (cuts remote access!)
+reset_clear_journal: true       # empty the systemd journal (ALL system logs, not only Obcell's)
+reset_forget_host: false        # on the controller: delete secrets/<host> and the host's inventory files
+
+# Everything the roles may have installed (any SDR profile, so a changed sdr_type is covered too).
+reset_sdr_packages: "{{ sdr_profiles.values() | map(attribute='packages') | flatten | unique }}"
+reset_build_deps: [libfftw3-dev, libmbedtls-dev, libsctp-dev, libyaml-cpp-dev, libgtest-dev, libzmq3-dev,
+                   libboost-program-options-dev, libconfig++-dev]
+reset_docker_packages: "{{ ['docker.io', 'docker-compose-v2', 'docker-buildx'] + (docker_extra_packages | default([])) }}"
+reset_stacks: [openlive, intercom, monitoring]
+reset_home_paths:
+  - ocudu
+  - srsRAN_4G
+  - openlive
+  - intercom
+  - monitoring
+  - obcell
+  - presentation
+  - kit                          # before the rename
+  - "{{ gnb_config | basename }}"
+  - gnb_zmq.yml
+  - ue_zmq.conf
+  - .local/bin/obcell
+  - .local/bin/kit
+reset_system_paths:
+  - "/etc/systemd/system/{{ gnb_unit }}.service"
+  - "/etc/systemd/system/{{ gnb_unit }}.service.d"
+  - "/etc/systemd/system/{{ control_unit }}.service"
+  - "/opt/{{ control_unit }}"
+  - "/etc/sudoers.d/{{ control_unit }}"
+  - /lib/systemd/system/open5gs-webui.service
+  - /etc/systemd/system/open5gs-webui.service.d
+  - /usr/lib/node_modules/open5gs
+  - /etc/open5gs
+  - /var/log/open5gs
+  - /var/lib/mongodb
+  - /var/log/mongodb
+  - /etc/mongod.conf
+  - /usr/share/uhd/images
+  - /etc/iptables/rules.v4
+  - /etc/modprobe.d/blacklist-rtl-sdr.conf
+  - /etc/udev/rules.d/99-usb2-roothub-no-autosuspend.rules
+  - /etc/apt/sources.list.d/nodesource.sources
+  - /usr/share/keyrings/nodesource.gpg
+reset_docker_paths: [/etc/docker, /var/lib/docker, /var/lib/containerd, /opt/containerd]
+reset_tailscale_paths: [/etc/apt/sources.list.d/tailscale.list, /usr/share/keyrings/tailscale-archive-keyring.gpg, /var/lib/tailscale]
+# Files the radio programs write (gNB, srsUE): logs and packet captures.
+reset_log_patterns: ["gnb_*.log", "gnb_*.pcap", "gnb_*.console", "ue*.log", "ue_*.pcap"]   # in /tmp

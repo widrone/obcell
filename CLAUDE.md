@@ -15,7 +15,9 @@ file holds the rules and working notes for agents.
    your inventory (`inventory/`).
    - Only `--check --diff` and `verify.yml` are allowed, unless the human explicitly asks
      you to apply something in this conversation.
-   - Never run `site.yml` or `restore.yml` against a real Obcell on your own.
+   - Never run `site.yml`, `restore.yml` or `reset.yml` against a real Obcell on your own.
+     `reset.yml --check` (a preview) is fine. On a real Obcell only a human passes
+     `obcell_reset_confirm`; in LXD test containers you may.
    - Never pass `-e obcell_confirm_host=…` to get past the "Right machine?" guard.
    - When you report drift, explain every changed task.
 3. **Secrets.**
@@ -49,7 +51,7 @@ file holds the rules and working notes for agents.
 ```bash
 ./bootstrap.sh && . ./activate               # controller venv (ansible-core picked by Python version)
 ansible-lint                                  # must pass (production profile)
-ansible-playbook --syntax-check site.yml verify.yml restore.yml
+ansible-playbook --syntax-check site.yml verify.yml restore.yml reset.yml
 python3 -m unittest discover -s tests/unit    # filter plugin tests
 shellcheck -S warning -x bootstrap.sh install.sh tests/matrix.sh tests/lxd/*.sh
 
