@@ -1,0 +1,637 @@
+"""OpenWebRX+ -> Open Intercom radio bridge.
+
+Listens to OpenWebRX+ like a browser would (websocket on 127.0.0.1:8073), on whatever the receiver is tuned
+to: the active SDR profile's frequency and mode. It follows profile changes made by anyone in OpenWebRX.
+It publishes that audio over WHIP into every Intercom line named RADIO_LINE (default "Radio"), as its own
+participant, e.g. "Radio 446.006 NFM". Crew who want to hear the radio add that line to their panel.
+
+Always on: it reconnects by itself, and follows lines being added and removed (checked every POLL seconds).
+Profiles without audio (ADS-B, ISM decoders, ...) give silence and the participant name says "no audio".
+On/off: the switch on Homepage (Caddy serves this service at /radio/ behind the login) or `obcell radio on|off`.
+Off leaves the lines and disconnects from OpenWebRX (so the receiver can idle); the choice survives restarts.
+Status: http://127.0.0.1:9104/status (JSON) and /metrics (Prometheus).
+"""
+import asyncio
+import fractions
+import json
+import logging
+import os
+import re
+import signal
+import time
+
+import aiohttp
+import av
+import numpy as np
+from aiohttp import web
+from aiortc import rtp as aiortc_rtp
+from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
+
+OWRX_WS = os.environ.get("OWRX_WS", "ws://127.0.0.1:8073/ws/")
+MANAGER = os.environ.get("INTERCOM_MANAGER", "http://127.0.0.1:8000").rstrip("/")
+WHIP_KEY = os.environ.get("WHIP_AUTH_KEY", "").strip()
+RADIO_LINE = os.environ.get("RADIO_LINE", "Radio").strip().lower()
+NAME_PREFIX = os.environ.get("RADIO_NAME", "Radio")
+GAIN = 10 ** (float(os.environ.get("RADIO_GAIN_DB", "0")) / 20)
+POLL = float(os.environ.get("POLL_SECONDS", "10"))
+STATUS_PORT = int(os.environ.get("STATUS_PORT", "9104"))
+STATE_FILE = os.environ.get("STATE_FILE", "/state/radio.json")
+# Browser origins allowed to switch the feed (cross-site request protection); the login itself is Authelia's.
+[% if obcell_tailnet_name %]
+ALLOWED_ORIGINS = set(os.environ.get("ALLOWED_ORIGINS", "https://[= obcell_mdns_name =],https://[= obcell_mdns_name =]:5443,"
+                                     "https://[= obcell_lan_ip =]:5443,https://[= obcell_tailnet_name =],"
+                                     "https://[= obcell_tailnet_name =]:5443").split(","))
+[% else %]
+ALLOWED_ORIGINS = set(os.environ.get("ALLOWED_ORIGINS", "https://[= obcell_mdns_name =],https://[= obcell_mdns_name =]:5443,"
+                                     "https://[= obcell_lan_ip =]:5443").split(","))
+[% endif %]
+
+RATE = 48000
+FRAME = 960                      # 20 ms at 48 kHz, one Opus frame
+PREBUFFER = RATE * 120 // 1000   # start playing once 120 ms is buffered
+MAXBUFFER = RATE * 400 // 1000   # above 400 ms (clock drift), drop back to the prebuffer level
+
+log = logging.getLogger("radio-bridge")
+
+
+def _audio_level_dbov(frame):
+    """Same result as aiortc.rtp.compute_audio_level_dbov (RFC 6465 level for the RTP header extension, which
+    the SFU uses for active-speaker detection), with numpy instead of a per-sample Python loop."""
+    a = np.frombuffer(bytes(frame.planes[0]), dtype="<i2").astype(np.float64)
+    rms = np.sqrt(np.sum(a * a) / (frame.samples * 32767.0 * 32767.0))
+    return round(min(max(20 * np.log10(rms), -127), 0)) if rms > 0 else -127
+
+
+aiortc_rtp.compute_audio_level_dbov = _audio_level_dbov
+
+
+# ---------------------------------------------------------------- OpenWebRX audio decoding (port of AudioEngine.js)
+IMA_INDEX = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8]
+IMA_STEP = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80, 88,
+            97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658,
+            724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327, 3660,
+            4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289, 16818,
+            18500, 20350, 22385, 24623, 27086, 29794, 32767]
+
+
+def _diff(step, n):
+    d = step >> 3
+    if n & 1: d += step >> 2
+    if n & 2: d += step >> 1
+    if n & 4: d += step
+    return -d if n & 8 else d
+
+
+NEXT_INDEX = [[min(max(i + IMA_INDEX[n], 0), 88) for n in range(16)] for i in range(89)]
+DIFF = np.array([[_diff(IMA_STEP[i], n) for n in range(16)] for i in range(89)], dtype=np.int32)
+
+
+class AdpcmSync:
+    """OpenWebRX's IMA ADPCM (mono): "SYNC", then int16 stepIndex + int16 predictor, then 1001 bytes of nibbles
+    (low nibble first), repeated. Decoded block-wise: only the 89-state step index is walked in Python, the
+    sample arithmetic is numpy."""
+
+    def __init__(self):
+        self.buf = b""
+        self.phase = 0          # 0 = looking for SYNC, 1 = reading the 4-byte header, 2 = audio bytes
+        self.left = 0           # audio bytes left until the next SYNC
+        self.index = self.pred = 0
+
+    def _block(self, data):
+        nib = np.empty(len(data) * 2, dtype=np.uint8)
+        arr = np.frombuffer(data, dtype=np.uint8)
+        nib[0::2], nib[1::2] = arr & 0x0F, arr >> 4
+        idx = np.empty(len(nib), dtype=np.int32)   # step index in force for each nibble
+        i, nxt = self.index, NEXT_INDEX
+        for k, n in enumerate(nib.tolist()):
+            idx[k] = i
+            i = nxt[i][n]
+        self.index = i
+        p = self.pred + np.cumsum(DIFF[idx, nib], dtype=np.int64)
+        if p.min() < -32768 or p.max() > 32767:    # rare: clamp exactly like the reference decoder
+            d, q = DIFF[idx, nib].tolist(), self.pred
+            for k in range(len(d)):
+                q = min(max(q + d[k], -32768), 32767)
+                p[k] = q
+        if len(p):
+            self.pred = int(p[-1])
+        return p.astype(np.int16)
+
+    def decode(self, data):
+        self.buf += bytes(data)
+        out = []
+        while self.buf:
+            if self.phase == 0:
+                k = self.buf.find(b"SYNC")
+                if k < 0:
+                    self.buf = self.buf[-3:]
+                    break
+                self.buf, self.phase = self.buf[k + 4:], 1
+            elif self.phase == 1:
+                if len(self.buf) < 4:
+                    break
+                self.index, self.pred = np.frombuffer(self.buf[:4], "<i2").tolist()
+                self.index = min(max(self.index, 0), 88)
+                self.buf, self.phase, self.left = self.buf[4:], 2, 1001
+            else:
+                chunk, self.buf = self.buf[:self.left], self.buf[self.left:]
+                self.left -= len(chunk)
+                out.append(self._block(chunk))
+                if self.left == 0:
+                    self.phase = 0
+        return np.concatenate(out) if out else np.zeros(0, np.int16)
+
+
+# ---------------------------------------------------------------- audio fan-out to every WHIP session
+class RadioTrack(MediaStreamTrack):
+    """Paced 20 ms Opus-ready frames from a small jitter buffer; silence when the radio has nothing."""
+    kind = "audio"
+
+    def __init__(self, hub):
+        super().__init__()
+        self.hub, self.buf, self.playing = hub, np.zeros(0, np.int16), False
+        self.t0, self.pts = None, 0
+        hub.tracks.add(self)
+
+    def feed(self, pcm):
+        self.buf = np.concatenate([self.buf, pcm])
+        if len(self.buf) > MAXBUFFER:
+            self.buf = self.buf[-PREBUFFER:]
+
+    async def recv(self):
+        if self.t0 is None:
+            self.t0 = time.monotonic()
+        wait = self.t0 + self.pts / RATE - time.monotonic()
+        if wait > 0:
+            await asyncio.sleep(wait)
+        if not self.playing and len(self.buf) >= PREBUFFER:
+            self.playing = True
+        if self.playing and len(self.buf) >= FRAME:
+            chunk, self.buf = self.buf[:FRAME], self.buf[FRAME:]
+        else:
+            self.playing = False
+            chunk = np.zeros(FRAME, np.int16)
+        frame = av.AudioFrame.from_ndarray(chunk.reshape(1, -1), format="s16", layout="mono")
+        frame.sample_rate, frame.pts, frame.time_base = RATE, self.pts, fractions.Fraction(1, RATE)
+        self.pts += FRAME
+        return frame
+
+    def stop(self):
+        self.hub.tracks.discard(self)
+        super().stop()
+
+
+class Hub:
+    def __init__(self):
+        self.tracks = set()
+        self.resamplers = {}
+        self.tuning = None          # e.g. {"freq": 446006250, "mod": "nfm", "profile": "PMR446 ...", "audio": True}
+        self.owrx_connected = False
+        self.audio_samples = 0
+        self.underruns = 0          # watchdog reconnects because OpenWebRX sent too little audio
+        self.rx_bytes = {}          # bytes received from OpenWebRX by message type (2 = audio, 4 = HD audio)
+        self.last_audio = 0.0
+        self.enabled = load_enabled()
+        self.enabled_ev = asyncio.Event()
+        if self.enabled:
+            self.enabled_ev.set()
+        self.wake = None            # set by main(): wakes the intercom loop
+        self.lines_found = None     # Intercom lines named Radio, as last seen
+
+    def set_enabled(self, on, who):
+        if on == self.enabled:
+            return
+        self.enabled = on
+        save_enabled(on)
+        log.info("radio feed switched %s by %s", "ON" if on else "OFF", who)
+        if on:
+            self.enabled_ev.set()
+        else:
+            self.enabled_ev.clear()
+            self.tuning = None      # rejoin with fresh tuning when switched back on
+        if self.wake:
+            self.wake()
+
+    def push(self, pcm, rate):
+        if not len(pcm):
+            return
+        if GAIN != 1:
+            pcm = np.clip(pcm.astype(np.float32) * GAIN, -32768, 32767).astype(np.int16)
+        if rate != RATE:
+            rs = self.resamplers.get(rate)
+            if rs is None:
+                rs = self.resamplers[rate] = av.AudioResampler(format="s16", layout="mono", rate=RATE)
+            f = av.AudioFrame.from_ndarray(pcm.reshape(1, -1), format="s16", layout="mono")
+            f.sample_rate = rate
+            frames = rs.resample(f)
+            if not frames:
+                return
+            pcm = np.concatenate([x.to_ndarray().reshape(-1) for x in frames])
+        self.audio_samples += len(pcm)
+        self.last_audio = time.time()
+        for t in list(self.tracks):
+            t.feed(pcm)
+
+    def participant_name(self):
+        return name_for(self.tuning)
+
+
+def load_enabled():
+    try:
+        with open(STATE_FILE) as f:
+            return bool(json.load(f).get("enabled", True))
+    except (OSError, ValueError):
+        return True                 # default: on
+
+
+def save_enabled(on):
+    try:
+        tmp = STATE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"enabled": on, "changed": time.strftime("%Y-%m-%d %H:%M:%S")}, f)
+        os.replace(tmp, STATE_FILE)
+    except OSError as e:
+        log.warning("could not save on/off state to %s: %s", STATE_FILE, e)
+
+
+def name_for(t):
+    """Intercom participant name, e.g. "Radio 446.006 NFM" (WHIP allows letters, digits, space, . - _)."""
+    if not t:
+        return f"{NAME_PREFIX} waiting"
+    mhz = f"{t['freq'] / 1e6:.3f}".rstrip("0").rstrip(".")
+    return f"{NAME_PREFIX} {mhz} {t['mod'].upper()}" + ("" if t["audio"] else " no audio")
+
+
+# ---------------------------------------------------------------- OpenWebRX receiver client
+async def openwebrx_loop(hub, on_retune):
+    """One OpenWebRX receiver session. Reconnects (fresh DSP chain) when the profile changes: after another
+    client switches profiles, OpenWebRX was seen feeding this session only ~40% of real-time audio. A watchdog
+    also reconnects whenever less than 80% of real time arrives over 10 s."""
+    while True:
+        quick = False
+        hub.owrx_connected = False
+        await hub.enabled_ev.wait()
+        try:
+            async with aiohttp.ClientSession() as http, http.ws_connect(OWRX_WS, heartbeat=30, max_msg_size=0) as ws:
+                await ws.send_str("SERVER DE CLIENT client=[= obcell_name =]-radio-bridge type=receiver")
+                await ws.send_str(json.dumps({"type": "connectionproperties",
+                                              "params": {"output_rate": 12000, "hd_output_rate": RATE}}))
+                hub.owrx_connected = True
+                log.info("connected to OpenWebRX %s", OWRX_WS)
+                cfg, modes, started = {}, {}, False
+                codecs = {2: AdpcmSync(), 4: AdpcmSync()}
+                win_t, win_s, tuned_at = time.monotonic(), hub.audio_samples, time.monotonic()
+                async for msg in ws:
+                    if not hub.enabled:
+                        log.info("disconnecting from OpenWebRX (feed switched off)")
+                        quick = True
+                        break
+                    if msg.type == aiohttp.WSMsgType.BINARY:
+                        kind, data = msg.data[0], msg.data[1:]
+                        hub.rx_bytes[kind] = hub.rx_bytes.get(kind, 0) + len(data)
+                        now = time.monotonic()
+                        if now - win_t >= 10:
+                            ratio = (hub.audio_samples - win_s) / RATE / (now - win_t)
+                            win_t, win_s = now, hub.audio_samples
+                            if hub.tuning and hub.tuning["audio"] and now - tuned_at > 10 and ratio < 0.8:
+                                hub.underruns += 1
+                                log.warning("only %.0f%% of real-time audio from OpenWebRX: reconnecting", ratio * 100)
+                                quick = True
+                                break
+                        if kind in (2, 4) and hub.tuning and hub.tuning["audio"]:
+                            if cfg.get("audio_compression", "adpcm") == "adpcm":
+                                pcm = codecs[kind].decode(data)
+                            else:
+                                pcm = np.frombuffer(data[: len(data) // 2 * 2], "<i2").copy()
+                            hub.push(pcm, 12000 if kind == 2 else RATE)
+                        continue
+                    if msg.type != aiohttp.WSMsgType.TEXT or not msg.data.startswith("{"):
+                        continue
+                    m = json.loads(msg.data)
+                    if m.get("type") == "modes":
+                        modes = {x["modulation"]: x for x in m["value"]}
+                    elif m.get("type") == "config":
+                        cfg.update(m["value"])
+                    else:
+                        continue
+                    if not ("center_freq" in cfg and "start_mod" in cfg and modes):
+                        continue
+                    mod = cfg["start_mod"]
+                    offset = cfg.get("start_offset_freq", cfg.get("start_freq", cfg["center_freq"]) - cfg["center_freq"])
+                    info = modes.get(mod, {})
+                    audio = info.get("type") == "analog" and "bandpass" in info
+                    tuning = {"freq": cfg["center_freq"] + offset, "mod": mod, "audio": audio,
+                              "profile": cfg.get("profile_id", ""), "sdr": cfg.get("sdr_id", "")}
+                    if tuning == hub.tuning and started:
+                        continue
+                    params = {"offset_freq": offset, "mod": mod if audio else "nfm",
+                              "squelch_level": cfg.get("initial_squelch_level", -150), "secondary_mod": False}
+                    if audio:
+                        params.update(low_cut=info["bandpass"]["low_cut"], high_cut=info["bandpass"]["high_cut"])
+                    await ws.send_str(json.dumps({"type": "dspcontrol", "params": params}))
+                    if not started:
+                        await ws.send_str(json.dumps({"type": "dspcontrol", "action": "start"}))
+                        started = True
+                    codecs = {2: AdpcmSync(), 4: AdpcmSync()}
+                    changed = hub.tuning is None or hub.participant_name() != name_for(tuning)   # None: (re)join now
+                    new_profile = hub.tuning is not None and (hub.tuning["sdr"], hub.tuning["profile"]) != (tuning["sdr"], tuning["profile"])
+                    hub.tuning, tuned_at = tuning, time.monotonic()
+                    log.info("tuned to %s (%s)", hub.participant_name(), tuning["profile"])
+                    if changed:
+                        on_retune()
+                    if new_profile:
+                        log.info("profile changed: reconnecting to OpenWebRX for a fresh receiver session")
+                        quick = True
+                        break
+            if not quick:
+                log.warning("OpenWebRX closed the connection")
+        except Exception as e:  # noqa: BLE001 - keep the bridge alive whatever happens
+            log.warning("OpenWebRX: %s", e)
+        hub.owrx_connected = False
+        await asyncio.sleep(0.5 if quick else 5)
+
+
+# ---------------------------------------------------------------- Intercom WHIP sessions
+class Session:
+    def __init__(self, hub, pid, lid, prod_name, line_name):
+        self.hub, self.pid, self.lid = hub, pid, lid
+        self.label = f"{prod_name} / {line_name}"
+        self.pc = self.track = self.location = self.session_id = None
+        self.name = None
+        self.since = None
+
+    async def start(self, http):
+        self.name = self.hub.participant_name()
+        self.pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))   # LAN only: no public STUN lookups
+        self.track = RadioTrack(self.hub)
+        self.pc.addTransceiver(self.track, direction="sendonly")
+        await self.pc.setLocalDescription(await self.pc.createOffer())
+        headers = {"Content-Type": "application/sdp"}
+        if WHIP_KEY:
+            headers["Authorization"] = f"Bearer {WHIP_KEY}"
+        url = f"{MANAGER}/api/v1/whip/{self.pid}/{self.lid}/{self.name}"
+        async with http.post(url, data=with_ssrc_msid(self.pc.localDescription.sdp), headers=headers) as r:
+            body = await r.text()
+            if r.status != 201:
+                raise RuntimeError(f"WHIP {r.status}: {body[:200]}")
+            self.location = r.headers["Location"]
+        self.session_id = self.location.rstrip("/").rsplit("/", 1)[-1]
+        await self.pc.setRemoteDescription(RTCSessionDescription(body, "answer"))
+        self.since = time.time()
+        log.info("joined %s as '%s'", self.label, self.name)
+
+    def alive(self):
+        return self.pc is not None and self.pc.connectionState not in ("failed", "closed")
+
+    async def stop(self, http):
+        if self.location:
+            try:
+                headers = {"Authorization": f"Bearer {WHIP_KEY}"} if WHIP_KEY else {}
+                async with http.delete(MANAGER + self.location, headers=headers) as r:
+                    await r.read()
+            except Exception as e:  # noqa: BLE001
+                log.warning("WHIP delete for %s: %s", self.label, e)
+        if self.track:
+            self.track.stop()
+        if self.pc:
+            await self.pc.close()
+        log.info("left %s", self.label)
+
+
+def with_ssrc_msid(sdp):
+    """Make aiortc's offer look like a browser's where the Intercom manager needs it:
+    - it reads our audio SSRC only from "a=ssrc:<id> msid:..." lines (aiortc only sends "cname"), and without
+      it the SFU drops our packets;
+    - it keeps only the last a=fingerprint line, and aiortc lists sha-256/384/512: the SFU then checks the
+      wrong hash and never finishes DTLS. Browsers send sha-256 only, so do the same."""
+    out, msid = [], None
+    for line in sdp.splitlines():
+        if line.startswith("a=fingerprint:") and not line.startswith("a=fingerprint:sha-256 "):
+            continue
+        if line.startswith("a=msid:"):
+            msid = line[len("a=msid:"):]
+        out.append(line)
+        m = re.match(r"a=ssrc:(\d+) cname:", line)
+        if m and msid and f"a=ssrc:{m.group(1)} msid:" not in sdp:
+            out.append(f"a=ssrc:{m.group(1)} msid:{msid}")
+    return "\r\n".join(out) + "\r\n"
+
+
+async def radio_lines(http):
+    """(production id, line id) -> (production name, line name) for every line called RADIO_LINE."""
+    found = {}
+    async with http.get(f"{MANAGER}/api/v1/productionlist?extended=true&limit=200") as r:
+        data = await r.json()
+    for p in data.get("productions", []):
+        for line in p.get("lines", []):
+            if line.get("name", "").strip().lower() == RADIO_LINE:
+                found[(str(p["productionId"]), str(line["id"]))] = (p["name"], line["name"], line.get("participants", []))
+    return found
+
+
+async def remove_leftovers(http, lines, keep):
+    """Delete WHIP participants named like ours that this process did not create (left by a crash or kill)."""
+    headers = {"Authorization": f"Bearer {WHIP_KEY}"} if WHIP_KEY else {}
+    for (pid, lid), (pname, lname, participants) in lines.items():
+        for u in participants:
+            if u.get("isWhip") and u.get("name", "").startswith(NAME_PREFIX + " ") and u.get("sessionId") not in keep:
+                async with http.delete(f"{MANAGER}/api/v1/whip/{pid}/{lid}/{u['sessionId']}", headers=headers) as r:
+                    log.info("removed leftover participant '%s' from %s / %s (%s)", u["name"], pname, lname, r.status)
+
+
+async def intercom_loop(hub, retune_event, sessions):
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as http:
+        while True:
+            if not hub.enabled:
+                for key, s in list(sessions.items()):
+                    log.info("leaving %s: feed switched off", s.label)
+                    await s.stop(http)
+                    del sessions[key]
+                hub.sessions = sessions
+                retune_event.clear()
+                await hub.enabled_ev.wait()
+                continue
+            try:
+                lines = await radio_lines(http)
+                hub.lines_found = len(lines)
+                await remove_leftovers(http, lines, {s.session_id for s in sessions.values()})
+                retune = retune_event.is_set()
+                retune_event.clear()
+                for key, s in list(sessions.items()):
+                    present = key in lines and any(u.get("sessionId") == s.session_id and u.get("isActive")
+                                                   for u in lines[key][2])
+                    young = s.since and time.time() - s.since < 30
+                    if key not in lines or not s.alive() or (not present and not young) or retune:
+                        why = ("line gone" if key not in lines else "retune" if retune else
+                               "connection " + s.pc.connectionState if not s.alive() else "session missing")
+                        log.info("leaving %s: %s", s.label, why)
+                        await s.stop(http)
+                        del sessions[key]
+                if hub.tuning is not None:
+                    for key, (pname, lname, _) in lines.items():
+                        if key not in sessions:
+                            s = Session(hub, *key, pname, lname)
+                            try:
+                                await s.start(http)
+                                sessions[key] = s
+                            except Exception as e:  # noqa: BLE001
+                                log.warning("joining %s / %s failed: %s", pname, lname, e)
+                                await s.stop(http)
+                hub.sessions = sessions
+            except Exception as e:  # noqa: BLE001
+                log.warning("Intercom: %s", e)
+            try:
+                await asyncio.wait_for(retune_event.wait(), POLL)
+            except asyncio.TimeoutError:
+                pass
+
+
+# ---------------------------------------------------------------- status endpoints
+def status_app(hub):
+    async def rtp_sent(x):
+        try:
+            return sum(v.packetsSent for v in (await x.pc.getStats()).values() if v.type == "outbound-rtp")
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def snapshot():
+        s = getattr(hub, "sessions", {})
+        return {
+            "enabled": hub.enabled,
+            "openwebrx_connected": hub.owrx_connected,
+            "tuning": hub.tuning,
+            "participant": hub.participant_name() if hub.enabled else "off",
+            "rx_bytes": hub.rx_bytes,
+            "watchdog_reconnects": hub.underruns,
+            "radio_lines_found": hub.lines_found,
+            "audio_seconds": round(hub.audio_samples / RATE, 1),
+            "audio_age_s": round(time.time() - hub.last_audio, 1) if hub.last_audio else None,
+            "lines": [{"line": x.label, "participant": x.name, "connection": x.pc.connectionState if x.pc else None,
+                       "rtp_packets_sent": await rtp_sent(x)} for x in s.values()],
+        }
+
+    async def status(_):
+        return web.json_response(await snapshot())
+
+    async def metrics(_):
+        st = await snapshot()
+        t = st["tuning"] or {}
+        connected = sum(1 for x in st["lines"] if x["connection"] == "connected")
+        esc = lambda v: re.sub(r'["\\\n]', "", str(v))  # noqa: E731
+        body = "\n".join([
+            "# HELP radio_bridge_enabled 1 if the radio feed is switched on (Homepage switch / obcell radio)",
+            f"radio_bridge_enabled {int(st['enabled'])}",
+            "# HELP radio_bridge_openwebrx_connected 1 if the bridge is connected to OpenWebRX",
+            f"radio_bridge_openwebrx_connected {int(st['openwebrx_connected'])}",
+            "# HELP radio_bridge_lines Intercom lines named Radio that the bridge is in, by WebRTC state",
+            f"radio_bridge_lines{{state=\"connected\"}} {connected}",
+            f"radio_bridge_lines{{state=\"other\"}} {len(st['lines']) - connected}",
+            "# HELP radio_bridge_audio_seconds_total Radio audio received from OpenWebRX",
+            f"radio_bridge_audio_seconds_total {hub.audio_samples / RATE:.1f}",
+            "# HELP radio_bridge_tuned_hz Frequency the bridge listens to",
+            f"radio_bridge_tuned_hz{{mod=\"{esc(t.get('mod', ''))}\",profile=\"{esc(t.get('profile', ''))}\","
+            f"audio=\"{int(bool(t.get('audio')))}\"}} {t.get('freq', 0)}",
+        ]) + "\n"
+        return web.Response(text=body, content_type="text/plain")
+
+    async def page(request):
+        if not request.headers.get("Remote-User"):
+            return web.json_response({"error": "login required"}, status=403)
+        return web.Response(text=PAGE, content_type="text/html", headers={"Cache-Control": "no-store"})
+
+    def switch(on):
+        async def handler(request):
+            # Only through Caddy + Authelia (sets Remote-User), from our own pages (Origin), or from the
+            # Obcell CLI on this host (Origin "obcell").
+            user = request.headers.get("Remote-User")
+            if not user:
+                return web.json_response({"error": "login required"}, status=403)
+            if request.headers.get("Origin") not in ALLOWED_ORIGINS | {"obcell"}:
+                return web.json_response({"error": "bad origin"}, status=403)
+            hub.set_enabled(on, user)
+            return web.json_response(await snapshot())
+        return handler
+
+    app = web.Application()
+    app.router.add_get("/", page)
+    app.router.add_get("/status", status)
+    app.router.add_get("/metrics", metrics)
+    app.router.add_post("/on", switch(True))
+    app.router.add_post("/off", switch(False))
+    return app
+
+
+PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>radio feed</title><style>
+:root{color-scheme:dark}
+body{margin:0;font:14px/1.35 Inter,system-ui,sans-serif;background:transparent;color:#e5e7eb}
+.wrap{display:flex;gap:10px;align-items:stretch;padding:4px}
+.state{flex:1;border-radius:8px;padding:8px 12px;background:rgba(255,255,255,.05);min-width:0}
+.big{font-weight:800;font-size:18px;letter-spacing:.5px}
+.sub{color:#9ca3af;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.on .big{color:#2dd4bf}.off .big{color:#9ca3af}.warn .big{color:#fbbf24}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:1px;background:#6b7280}
+.on .dot{background:#14b8a6;box-shadow:0 0 10px #14b8a6}.warn .dot{background:#f59e0b}
+button{border:0;border-radius:8px;font:700 14px Inter,system-ui,sans-serif;padding:0 16px;cursor:pointer;letter-spacing:.5px}
+#on{background:#0f766e;color:#fff}#off{background:#374151;color:#e5e7eb}
+button:disabled{opacity:.35;cursor:default}
+</style></head><body><div class="wrap">
+<div id="st" class="state off"><div class="big"><span class="dot"></span><span id="lbl">…</span></div><div class="sub" id="det">checking</div></div>
+<button id="on" onclick="act('on')">ON</button><button id="off" onclick="act('off')">OFF</button>
+</div><script>
+let busy=false;
+function show(s){
+  const st=document.getElementById('st'),l=document.getElementById('lbl'),d=document.getElementById('det');
+  const n=s.lines.length, ok=s.lines.filter(x=>x.connection==='connected').length;
+  let cls='off',txt='RADIO OFF',det='not feeding Intercom · OpenWebRX can idle';
+  if(s.enabled){
+    cls=(s.openwebrx_connected&&ok===n&&(n>0||s.radio_lines_found===0))?'on':'warn'; txt='RADIO ON';
+    const f=s.radio_lines_found;
+    det=(s.tuning?s.participant:'waiting for OpenWebRX')+' · '+(n?ok+'/'+n+' Radio line'+(n>1?'s':''):(f===0?'no Intercom line named Radio':'joining…'))+
+        (s.openwebrx_connected?'':' · receiver not connected');
+  }
+  st.className='state '+cls;l.textContent=txt;d.textContent=det;
+  if(!busy){document.getElementById('on').disabled=s.enabled;document.getElementById('off').disabled=!s.enabled;}
+}
+async function refresh(){
+  try{show(await (await fetch('status',{cache:'no-store'})).json());}
+  catch(e){document.getElementById('det').textContent='radio bridge unreachable (obcell up intercom)';}
+}
+async function act(a){
+  busy=true;document.getElementById('on').disabled=document.getElementById('off').disabled=true;
+  document.getElementById('det').textContent=(a==='on'?'switching on':'switching off')+'…';
+  try{const r=await fetch(a,{method:'POST'});const j=await r.json();if(!r.ok)alert(j.error||'failed');}
+  catch(e){alert('request failed');}
+  busy=false;setTimeout(refresh,a==='on'?2500:300);
+}
+refresh();setInterval(refresh,3000);
+</script></body></html>"""
+
+
+async def main():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger("aioice").setLevel(logging.WARNING)
+    hub = Hub()
+    retune = asyncio.Event()
+    hub.wake = retune.set
+    runner = web.AppRunner(status_app(hub), access_log=None)
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", STATUS_PORT).start()
+    log.info("radio bridge: OpenWebRX %s -> Intercom lines named '%s' (%s)", OWRX_WS, RADIO_LINE, MANAGER)
+    sessions = {}
+    task = asyncio.gather(openwebrx_loop(hub, retune.set), intercom_loop(hub, retune, sessions))
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        asyncio.get_running_loop().add_signal_handler(sig, task.cancel)
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    # Leave the lines cleanly: WHIP participants never time out by themselves.
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as http:
+        for s in list(sessions.values()):
+            await s.stop(http)
+    log.info("stopped")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

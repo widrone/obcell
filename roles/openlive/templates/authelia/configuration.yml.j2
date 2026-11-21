@@ -1,0 +1,61 @@
+# Authelia login portal for Open Live on https://{{ obcell_mdns_name }}/authelia.
+# Secrets come from environment variables (AUTHELIA_*), set in ../.env.
+
+theme: dark
+
+server:
+  address: 'tcp://127.0.0.1:9091/authelia'
+
+log:
+  level: info
+
+authentication_backend:
+  password_reset:
+    disable: true
+  file:
+    path: /config/users.yml
+    password:
+      algorithm: argon2
+
+access_control:
+  default_policy: deny
+  rules:
+    - domain: '{{ obcell_mdns_name }}'
+      policy: one_factor
+    - domain: '{{ obcell_lan_ip }}'
+      policy: one_factor
+{% if obcell_tailnet_name %}
+    - domain: '{{ obcell_tailnet_name }}'
+      policy: one_factor
+{% endif %}
+
+session:
+  name: openlive_session
+  inactivity: 12h
+  expiration: 24h
+  remember_me: 30d
+  cookies:
+    - domain: '{{ obcell_mdns_name }}'
+      authelia_url: 'https://{{ obcell_mdns_name }}/authelia'
+      default_redirection_url: 'https://{{ obcell_mdns_name }}/'
+    - domain: '{{ obcell_lan_ip }}'
+      authelia_url: 'https://{{ obcell_lan_ip }}:8443/authelia'
+      default_redirection_url: 'https://{{ obcell_lan_ip }}:8443/'
+{% if obcell_tailnet_name %}
+    - domain: '{{ obcell_tailnet_name }}'
+      authelia_url: 'https://{{ obcell_tailnet_name }}:8443/authelia'
+      default_redirection_url: 'https://{{ obcell_tailnet_name }}/'
+{% endif %}
+
+regulation:
+  max_retries: 5
+  find_time: 2m
+  ban_time: 10m
+
+storage:
+  local:
+    path: /data/db.sqlite3
+
+notifier:
+  filesystem:
+    filename: /data/notification.txt

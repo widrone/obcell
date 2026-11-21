@@ -1,0 +1,148 @@
+# Links use {{ ('the Tailscale name ' ~ obcell_link_host ~ ' (works on the tailnet)') if obcell_tailnet_name else ('the LAN name ' ~ obcell_link_host) }}; status checks and figures are read server-side on this host.
+- 5G network:
+    - gNB {{ cell_label }} ({{ cell_freq_label ~ ' MHz' }}):
+        icon: mdi-radio-tower
+        description: OCUDU gNB on the {{ sdr.short }} · systemd unit {{ gnb_unit }}
+        href: https://{{ obcell_link_host }}:3443/d/eejyoivnn239cc
+        widget:
+          type: prometheusmetric
+          url: http://127.0.0.1:9095
+          refreshInterval: 5000
+          metrics:
+            - label: Cell on air
+              query: sum(gnb{nf="amf"}) or vector(0)
+              format: {type: text}
+            - label: 5G phones
+              query: sum(ran_ue{nf="amf"}) or vector(0)
+{% if sdr.usb_kind %}
+            - label: {{ sdr.short }} plugged in
+              query: sum(sdr_devices{kind="{{ sdr.usb_kind }}"}) or vector(0)
+{% endif %}
+    - {{ cell_label }} on-air control:
+        icon: mdi-radio-tower
+        description: Start / stop the {{ cell_label }} cell ({{ cell_freq_label ~ ' MHz' }})
+        widget:
+          type: iframe
+          name: n40control
+          src: /control/
+          classes: h-16
+          allowScrolling: "no"
+    - Open5GS core:
+        icon: mdi-server-network
+        description: 4G EPC + 5G core · subscribers and SIMs in the WebUI
+        href: https://{{ obcell_link_host }}:{{ open5gs_webui_https_port }}
+        siteMonitor: http://127.0.0.1:{{ open5gs_webui_port }}
+        widget:
+          type: prometheusmetric
+          url: http://127.0.0.1:9095
+          refreshInterval: 5000
+          metrics:
+            - label: Core NFs up
+              query: sum(up{job="open5gs"})
+              format: {type: text, suffix: " / 7"}
+            - label: 4G cells
+              query: sum(enb{nf="mme"}) or vector(0)
+            - label: 4G phones
+              query: sum(enb_ue{nf="mme"}) or vector(0)
+            - label: Data sessions
+              query: sum(fivegs_upffunction_upf_sessionnbr{nf="upf"}) or vector(0)
+    - Phone traffic:
+        icon: mdi-cellphone-wireless
+        description: All 4G/5G phone data on ogstun (ntopng)
+        href: https://{{ obcell_link_host }}:4443
+        widget:
+          type: prometheusmetric
+          url: http://127.0.0.1:9095
+          refreshInterval: 10000
+          metrics:
+            - label: Phones with traffic
+              query: sum(ntopng_phone_hosts) or vector(0)
+            - label: Throughput
+              query: sum(ntopng_interface_throughput_bps{ifname="ogstun"}) or vector(0)
+              format: {type: bitrate}
+            - label: Flows
+              query: sum(ntopng_interface_flows{ifname="ogstun"}) or vector(0)
+
+- Production:
+    - Open Live Studio:
+        icon: mdi-video-switch
+        description: Vision mixer, guests (WHIP) and graphics · runs by default (≈1% CPU idle)
+        href: https://{{ obcell_link_host }}:7443/
+        siteMonitor: http://127.0.0.1:8081
+    - Open Intercom:
+        icon: mdi-headset
+        description: Crew intercom · guests can join without login
+        href: https://{{ obcell_link_host }}:8443
+        siteMonitor: http://127.0.0.1:8082
+    - OpenWebRX+ spectrum:
+        icon: mdi-sine-wave
+        description: Web SDR waterfall for an RTL-SDR (RF/interference check)
+        href: https://{{ obcell_link_host }}:6443
+        siteMonitor: http://127.0.0.1:8073
+    - Radio into Intercom:
+        icon: mdi-radio-tower
+        description: Whatever OpenWebRX is tuned to, in every Intercom line named "Radio"
+        widget:
+          type: iframe
+          name: radiofeed
+          src: /radio/
+          classes: h-16
+          allowScrolling: "no"
+    - RTL-SDR receiver:
+        icon: mdi-antenna
+        description: RTL2832U + R820T dongle · ~24 MHz-1.7 GHz (not {{ cell_label }}) · opened by OpenWebRX
+        href: https://{{ obcell_link_host }}:6443
+        widget:
+          type: prometheusmetric
+          url: http://127.0.0.1:9095
+          refreshInterval: 10000
+          metrics:
+            - label: Dongle plugged in
+              query: sum(sdr_devices{kind="rtlsdr"}) or vector(0)
+            - label: Listeners
+              query: sum(openwebrx_users) or vector(0)
+            - label: Receiver up
+              query: max(up{job="openwebrx"}) or vector(0)
+
+- Monitoring:
+    - Obcell health:
+        icon: mdi-heart-pulse
+        description: Service probes and alert rules (Prometheus) · click for the alert list
+        href: https://{{ obcell_link_host }}:3443/alerting/list
+        widget:
+          type: prometheusmetric
+          url: http://127.0.0.1:9095
+          refreshInterval: 15000
+          metrics:
+            - label: Alerts firing
+              query: count(ALERTS{alertstate="firing"}) or vector(0)
+            - label: Services down
+              query: count(probe_success == 0) or vector(0)
+            - label: TLS cert days
+              query: floor(min(probe_ssl_earliest_cert_expiry{service="{{ 'front-door-tailnet' if obcell_tailnet_name else 'front-door-lan' }}"} - time()) / 86400)
+              format: {type: number, suffix: " d"}
+    - Grafana:
+        icon: grafana.png
+        description: Core, radio, traffic and host dashboards
+        href: https://{{ obcell_link_host }}:3443
+        siteMonitor: http://127.0.0.1:3300/api/health
+    - ntopng:
+        icon: mdi-lan
+        description: Per-host traffic on phones (ogstun) and LAN ({{ obcell_lan_iface }})
+        href: https://{{ obcell_link_host }}:4443
+        widget:
+          type: prometheusmetric
+          url: http://127.0.0.1:9095
+          refreshInterval: 10000
+          metrics:
+            - label: LAN throughput
+              query: sum(ntopng_interface_throughput_bps{ifname="{{ obcell_lan_iface }}"}) or vector(0)
+              format: {type: bitrate}
+            - label: Alerted flows
+              query: sum(ntopng_interface_alerted_flows) or vector(0)
+    - Prometheus targets:
+        icon: prometheus.png
+        description: Metric sources (Open5GS, host, ntopng, SDR, service probes)
+        widget:
+          type: prometheus
+          url: http://127.0.0.1:9095

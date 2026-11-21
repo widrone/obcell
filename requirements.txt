@@ -1,0 +1,10 @@
+# ansible-core supports a narrow window of controller Pythons, so pick by the Python we run on:
+#   Ubuntu 22.04 = Python 3.10 -> 2.17;  24.04 = 3.12 and 26.04 = 3.14 -> 2.20.
+ansible-core>=2.17,<2.18; python_version < "3.11"
+ansible-core>=2.19,<2.20; python_version >= "3.11" and python_version < "3.12"
+ansible-core>=2.20,<2.21; python_version >= "3.12"
+ansible-lint
+netaddr
+passlib
+argon2-cffi
+bcrypt<4.1

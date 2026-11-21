@@ -1,0 +1,27 @@
+// Managed by obcell (roles/monitoring/templates/homepage/custom.js.j2).
+// Service links in services.yaml point at {{ obcell_link_host }}. When this page is opened on
+// another of the Obcell's names, point them at that name instead, so they work on devices
+// without Tailscale and stay on the same login (Authelia cookies are per name).
+// Only ports Caddy serves on that name are rewritten; the rest keep {{ obcell_link_host }}.
+(() => {
+  const LINK_HOST = {{ obcell_link_host | to_json }};
+  const SERVED = {{ {
+    obcell_mdns_name: [443, 3443, 4443, 5443, 6443, 7443, 8443, open5gs_webui_https_port | int],
+    obcell_lan_ip: [3443, 4443, 5443, 6443, 8443, open5gs_webui_https_port | int],
+  } | to_json }};
+  const here = location.hostname;
+  if (here === LINK_HOST || !(here in SERVED)) return;
+  const fix = (a) => {
+    try {
+      const u = new URL(a.href);
+      if (u.hostname !== LINK_HOST) return;
+      const port = Number(u.port || (u.protocol === "https:" ? 443 : 80));
+      if (!SERVED[here].includes(port)) return;
+      u.hostname = here;
+      a.href = u.toString();
+    } catch (e) { /* leave the link as it is */ }
+  };
+  const run = () => document.querySelectorAll(`a[href*="//${LINK_HOST}"]`).forEach(fix);
+  new MutationObserver(run).observe(document.documentElement, { childList: true, subtree: true });
+  run();
+})();

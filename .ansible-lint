@@ -1,0 +1,18 @@
+profile: production
+offline: true
+skip_list:
+  - name[casing]            # task names describe things ("gNB ...", "Obcell ...")
+  - name[template]
+  - var-naming[no-role-prefix]
+  - command-instead-of-module
+  - no-changed-when         # builds/one-shot commands are guarded by stat/creates
+  - no-handler
+  - risky-shell-pipe
+  - yaml[line-length]
+  - fqcn[action-core]
+  - key-order[task]
+  - jinja[spacing]
+  - risky-file-permissions  # existing files keep their modes; secrets set 0600 explicitly
+exclude_paths:
+  - .ansible/
+  - secrets/

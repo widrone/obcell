@@ -1,0 +1,5 @@
+# <srt-port> <rtmps-url> [srt-passphrase]   (stream keys included; keep this file private)
+# Ports must match the Open Live sources: RTMPS 1 = srt://:9001?mode=listener, RTMPS 2 = srt://:9002?mode=listener
+# Fill in the real RTMPS pull URLs (or keep them in secrets/{{ inventory_hostname }}/rtmps_feeds.conf).
+9001 rtmps://example.invalid/live/STREAM-KEY-1 {{ srt_passphrase }}
+9002 rtmps://example.invalid/live/STREAM-KEY-2 {{ srt_passphrase }}

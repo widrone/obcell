@@ -1,0 +1,88 @@
+- name: Intercom directories
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/intercom/{{ item }}"
+    state: directory
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0775"
+  loop: ["", radio-bridge]
+
+- name: Intercom manager + frontend source (pinned)
+  ansible.builtin.include_tasks: ../../common/tasks/git_patched.yml
+  vars:
+    repo: "{{ src_repo.repo }}"
+    dest: "{{ obcell_home }}/intercom/{{ src_repo.dir }}"
+    version: "{{ src_repo.version }}"
+    owner: "{{ obcell_user }}"
+    patches: []
+  loop:
+    - {repo: "https://github.com/Eyevinn/intercom-manager", dir: intercom-manager, version: 5faf97e79330bddb2a30d6083cf98f8a19b9cac3}
+    - {repo: "https://github.com/Eyevinn/intercom-frontend", dir: intercom-frontend, version: 1009edc604234804373843f378e87c1dc4b90676}
+  loop_control:
+    loop_var: src_repo
+    label: "{{ src_repo.dir }}"
+
+- name: Remember whether the sources changed
+  ansible.builtin.set_fact:
+    intercom_rebuild: "{{ intercom_rebuild | default(false) or git_patched_changed }}"
+
+- name: Secret files (.env, CREDENTIALS.txt; diff hidden)
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ obcell_home }}/intercom/{{ item.dest }}"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0600"
+  diff: false
+  loop:
+    - {src: env.j2, dest: .env}
+  loop_control:
+    label: "{{ item.dest }}"
+
+- name: Stack files
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ obcell_home }}/intercom/{{ item.dest }}"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "{{ item.mode | default('0664') }}"
+  loop:
+    - {src: compose.yml.j2, dest: compose.yml}
+  loop_control:
+    label: "{{ item.dest }}"
+
+- name: Radio bridge (OpenWebRX -> WHIP into Intercom "Radio" lines)
+  ansible.builtin.copy:
+    src: "radio-bridge/{{ item }}"
+    dest: "{{ obcell_home }}/intercom/radio-bridge/{{ item }}"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+  loop: [Dockerfile, requirements.txt]
+  register: bridge_files
+
+- name: Radio bridge script
+  ansible.builtin.template:
+    src: radio-bridge/radio_bridge.py.j2
+    dest: "{{ obcell_home }}/intercom/radio-bridge/radio_bridge.py"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    variable_start_string: "[="
+    variable_end_string: "=]"
+    block_start_string: "[%"
+    block_end_string: "%]"
+    comment_start_string: "[#"
+    comment_end_string: "#]"
+  register: bridge_script
+
+- name: Stack up (SFU, manager, web app, radio bridge)
+  community.docker.docker_compose_v2:
+    project_src: "{{ obcell_home }}/intercom"
+    state: present
+    build: "{{ 'always' if (intercom_rebuild or bridge_files is changed or bridge_script is changed) else 'policy' }}"
+
+- name: Seed productions (created only if no production with that name exists)
+  ansible.builtin.include_tasks: seed.yml
+  loop: "{{ intercom_productions }}"
+  loop_control:
+    loop_var: production
+  when: not ansible_check_mode

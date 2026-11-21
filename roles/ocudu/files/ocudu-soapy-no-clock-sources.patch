@@ -1,0 +1,25 @@
+diff --git a/lib/radio/uhd/radio_uhd_device.h b/lib/radio/uhd/radio_uhd_device.h
+index 6eb1e64b4e..a325c4767b 100644
+--- a/lib/radio/uhd/radio_uhd_device.h
++++ b/lib/radio/uhd/radio_uhd_device.h
+@@ -305,12 +305,18 @@ public:
+     logger.debug("Setting PPS source to '{}' and clock source to '{}'.", sync_src, clock_src);
+ #if UHD_VERSION < 3140099
+     return safe_execution([this, &sync_src, &clock_src]() {
+-      std::vector<std::string> time_sources = usrp->get_time_sources(0);
++      std::vector<std::string> time_sources  = usrp->get_time_sources(0);
++      std::vector<std::string> clock_sources = usrp->get_clock_sources(0);
++      // Devices behind the UHD-Soapy bridge, such as the LimeSDR, list no sources and run from their internal
++      // reference.
++      if (time_sources.empty() && clock_sources.empty() && sync_src == "internal" && clock_src == "internal") {
++        logger.info("Device lists no time or clock sources. Using its internal reference.");
++        return;
++      }
+       if (std::find(time_sources.begin(), time_sources.end(), sync_src) == time_sources.end()) {
+         on_error("Invalid time source {}. Supported: {}", sync_src, span<const std::string>(time_sources));
+         return;
+       }
+-      std::vector<std::string> clock_sources = usrp->get_clock_sources(0);
+       if (std::find(clock_sources.begin(), clock_sources.end(), clock_src) == clock_sources.end()) {
+         on_error("Invalid clock source {}. Supported: {}", clock_src, span<const std::string>(clock_sources));
+         return;

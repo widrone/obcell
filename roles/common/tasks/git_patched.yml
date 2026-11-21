@@ -1,0 +1,89 @@
+# Clone/checkout a repo at a pinned version and keep local patches applied.
+# vars: repo, dest, version, patches (list of local patch files), owner
+# sets: git_patched_changed (true when the source tree changed -> rebuild)
+- name: "{{ dest | basename }}: present"
+  ansible.builtin.git:
+    repo: "{{ repo }}"
+    dest: "{{ dest }}"
+    version: "{{ version }}"
+    update: false
+  become: true
+  become_user: "{{ owner }}"
+  register: _clone
+
+- name: "{{ dest | basename }}: current commit"
+  ansible.builtin.command: git -C {{ dest }} rev-parse HEAD
+  register: _head
+  changed_when: false
+  check_mode: false
+  become: true
+  become_user: "{{ owner }}"
+  when: not ansible_check_mode or (_clone.before is not none)
+
+- name: "{{ dest | basename }}: wanted commit"
+  ansible.builtin.command: git -C {{ dest }} rev-parse {{ version }}^{commit}
+  register: _want
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: true
+  become_user: "{{ owner }}"
+  when: _head is not skipped
+
+- name: "{{ dest | basename }}: move to {{ version }} (local patches are re-applied below)"
+  ansible.builtin.shell: |
+    set -e
+    git -C {{ dest }} fetch --tags origin
+    git -C {{ dest }} checkout -- .
+    git -C {{ dest }} checkout --detach {{ version }}
+  become: true
+  become_user: "{{ owner }}"
+  when: _head is not skipped and (_want.rc != 0 or _want.stdout != _head.stdout)
+  register: _moved
+
+- name: "{{ dest | basename }}: patch directory"
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/obcell/patches"
+    state: directory
+    owner: "{{ owner }}"
+    group: "{{ owner }}"
+    mode: "0775"
+
+- name: "{{ dest | basename }}: patch files (kept in ~/obcell/patches for manual git pulls)"
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ obcell_home }}/obcell/patches/{{ item | basename }}"
+    owner: "{{ owner }}"
+    group: "{{ owner }}"
+    mode: "0664"
+  loop: "{{ patches | default([]) }}"
+  when: _head is not skipped
+
+- name: "{{ dest | basename }}: patch already applied?"
+  ansible.builtin.command: git -C {{ dest }} apply --reverse --check {{ obcell_home }}/obcell/patches/{{ item | basename }}
+  loop: "{{ patches | default([]) }}"
+  register: _applied
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  become: true
+  become_user: "{{ owner }}"
+  when: _head is not skipped
+
+# Any patch missing (new tree, or a patch file whose content changed): reset the tracked files
+# and apply every patch again, so an edited patch never lands on top of its old version.
+- name: "{{ dest | basename }}: apply patches on a clean tree"
+  ansible.builtin.shell: |
+    set -e
+    git -C {{ dest }} checkout -- .
+    {% for p in patches | default([]) %}
+    git -C {{ dest }} apply {{ obcell_home }}/obcell/patches/{{ p | basename }}
+    {% endfor %}
+  when: (_applied.results | default([]) | selectattr('rc', 'defined') | rejectattr('rc', 'equalto', 0) | list) | length > 0
+  register: _patched
+  become: true
+  become_user: "{{ owner }}"
+
+- name: "{{ dest | basename }}: changed?"
+  ansible.builtin.set_fact:
+    git_patched_changed: "{{ (_clone is changed) or (_moved is changed) or (_patched is changed) }}"

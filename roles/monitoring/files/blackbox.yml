@@ -1,0 +1,31 @@
+# Probes for Obcell services (Prometheus job "probe" in ../prometheus/prometheus.yml).
+modules:
+  # A local service answering on loopback.
+  http_up:
+    prober: http
+    timeout: 5s
+    http:
+      preferred_ip_protocol: ip4
+      no_follow_redirects: true
+      valid_status_codes: [200, 204, 301, 302, 401, 403]
+  # Front door on the tailnet: real Let's Encrypt cert must verify. Authelia answers non-browser
+  # clients with 401 (browsers get a 302 to the login), so both mean "front door and login are up".
+  https_frontdoor:
+    prober: http
+    timeout: 8s
+    http:
+      preferred_ip_protocol: ip4
+      no_follow_redirects: true
+      valid_status_codes: [200, 302, 401]
+      fail_if_not_ssl: true
+  # Front door on the LAN IP: Caddy's internal CA.
+  https_frontdoor_lan:
+    prober: http
+    timeout: 8s
+    http:
+      preferred_ip_protocol: ip4
+      no_follow_redirects: true
+      valid_status_codes: [200, 302]
+      fail_if_not_ssl: true
+      tls_config:
+        ca_file: /etc/blackbox/lan-root-ca.crt

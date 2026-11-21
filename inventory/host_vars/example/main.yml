@@ -1,0 +1,37 @@
+# EXAMPLE settings for one Obcell, modelled on the reference box: an Intel NUC with a Core i5-6260U
+# (2 cores / 4 threads), 15 GiB, Ubuntu 22.04 and a LimeSDR Mini on USB 3. Nothing loads this
+# file (there is no host called "example"). install.sh writes a real one for your box as
+# inventory/host_vars/<name>/main.yml; copy what you need from here. docs/configuration.md
+# explains every setting.
+obcell_user: obcell
+obcell_name: obcell1
+obcell_lan_iface: eno1
+obcell_timezone: Etc/UTC
+
+tailscale_enabled: true
+obcell_tailnet_name: obcell1.example-tailnet.ts.net
+tailscale_advertise_routes: 192.168.1.10/32   # the box's LAN address: Intercom audio for tailnet clients
+
+sdr_type: limesdr_mini
+sdr_serial: 1D4000000000AB   # from lsusb -v, or leave "" for the first one found
+cell:
+  band: 40
+  dl_arfcn: 470000
+  bandwidth_mhz: 20
+  scs_khz: 30
+  pci: 1
+  srate: 23.04
+  tx_gain: 50
+  rx_gain: 40
+
+srsue_enabled: true
+rtlsdr_enabled: true
+usb2_roothub_no_autosuspend: true   # this NUC's USB2 root hub loops in runtime suspend
+obcell_cpu_note: "CPUs 2-3 are the hyper-thread siblings of 0-1 (i5-6260U, 2 cores / 4 threads)."
+
+# Runbook (~/obcell/README.md) wording for this box
+obcell_hardware_desc: 4-core NUC
+obcell_readme_cpu_header: "Core i5-6260U: **2 physical cores, 4 threads**; logical CPUs 0+2 share core 0, and 1+3 share core 1"
+obcell_readme_cpu_sibling_note: "These are the hyper-thread twins of 0–1, so the split is soft: heavy container load (an active Open Live production, the radio feed) still competes with the gNB for the same physical cores."
+obcell_readme_hw_quirks:
+  - "**USB:** port 4 on the NUC is dead (over-current). The RTL-SDR uses another port."

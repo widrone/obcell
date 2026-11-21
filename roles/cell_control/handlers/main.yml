@@ -1,0 +1,5 @@
+- name: Restart control
+  ansible.builtin.systemd:
+    name: "{{ control_unit }}"
+    state: restarted
+    daemon_reload: true

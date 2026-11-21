@@ -1,0 +1,13 @@
+# Fresh-install tests: one LXD system container per Ubuntu LTS on the control machine,
+# ZMQ radio (no RF). Shared test settings: group_vars/obcell.yml. Driven by run.sh.
+all:
+  children:
+    obcell:
+      vars:
+        ansible_connection: community.general.lxd
+        ansible_host: "{{ inventory_hostname }}"
+        ansible_python_interpreter: /usr/bin/python3
+      hosts:
+        obcell-jammy:            # Ubuntu 22.04 (jammy)
+        obcell-noble:      # Ubuntu 24.04 (noble)
+        obcell-resolute:   # Ubuntu 26.04 (resolute)

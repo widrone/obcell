@@ -1,0 +1,113 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  .chain { position: absolute; left: 96px; right: 96px; top: 312px; display: flex; align-items: center; }
+  .chain .node { width: 236px; flex: none; min-height: 196px; }
+  .chain .gap { flex: 1; padding: 0 12px; }
+  .boxed .node { width: 212px; }
+  .chain .gap.radio { flex: none; width: 210px; padding: 0 18px; }
+  .boxed {
+    flex: 1; display: flex; align-items: center; position: relative;
+    border: 2px dashed var(--line-strong); border-radius: 22px; padding: 30px 26px;
+  }
+  .boxed .bl {
+    position: absolute; top: -13px; left: 28px; background: var(--bg); padding: 0 12px;
+    font-family: var(--mono); font-size: 15px; letter-spacing: 2px; text-transform: uppercase; color: var(--faint);
+  }
+  .ue { border-style: dashed; }
+  .cols { position: absolute; left: 96px; right: 96px; top: 610px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+  .cols .node { padding: 24px 28px; }
+  .cols ul { list-style: none; margin-top: 12px; }
+  .cols li { font-size: 19px; line-height: 1.5; color: var(--ink); padding-left: 18px; position: relative; }
+  .cols li::before { content: ""; position: absolute; left: 0; top: 12px; width: 7px; height: 7px; border-radius: 2px; background: var(--line-strong); }
+  .cols li span { font-family: var(--mono); font-size: 16px; color: var(--muted); }
+  .stats { position: absolute; left: 96px; right: 96px; top: 900px; display: flex; gap: 64px; align-items: baseline; }
+  .stat { display: flex; align-items: baseline; gap: 14px; }
+  .stat .n { font-size: 52px; font-weight: 800; letter-spacing: -1px; }
+  .stat .l { font-size: 20px; color: var(--muted); }
+  .stat.zero .n { color: var(--accent); }
+  .stat.zero .l i { font-style: normal; font-family: var(--mono); font-size: 16px; color: var(--accent); }
+</style></head>
+<body><div class="slide">
+  <div class="kicker">02 / 05 · Architecture</div>
+  <h1>A private 4G/5G network in one box</h1>
+  <div class="sub">Radio, mobile core and remote-production services on a single small PC. All open source, all on the bench.</div>
+
+  <div class="chain">
+    <div class="node ue">
+      <div class="t">Phones &amp; cameras</div>
+      <div class="d">5G SA user equipment</div>
+      <div class="m">PLMN 999-70 (test)</div>
+    </div>
+    <div class="gap radio"><div class="arrow accent"><span class="lbl">5G NR · band n40</span><span class="lbl below">2350 MHz · 20 MHz TDD</span></div></div>
+    <div class="boxed">
+    <div class="bl">One PC · Core i5-6260U · 2 cores / 4 threads · 15 GiB · Intel iGPU</div>
+    <div class="node accent">
+      <div class="t">LimeSDR Mini</div>
+      <div class="d">Software-defined radio front end</div>
+      <div class="m">USB 3 · 23.04 MS/s</div>
+    </div>
+    <div class="gap"><div class="arrow"><span class="lbl">I/Q</span></div></div>
+    <div class="node">
+      <div class="t">OCUDU gNB</div>
+      <div class="d">5G base station in software</div>
+      <div class="m">30 kHz SCS<br>CPUs 0–1</div>
+    </div>
+    <div class="gap"><div class="arrow"><span class="lbl">NGAP<br>GTP-U</span></div></div>
+    <div class="node">
+      <div class="t">Open5GS</div>
+      <div class="d">5G core + 4G EPC</div>
+      <div class="m">v2.8.0</div>
+    </div>
+    <div class="gap"><div class="arrow"><span class="lbl">ogstun<br>10.45.0.0/16</span></div></div>
+    <div class="node dark">
+      <div class="t">Services</div>
+      <div class="d">Production, intercom &amp; monitoring</div>
+      <div class="m">CPUs 2–3</div>
+    </div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="node">
+      <div class="section-label">Radio</div>
+      <ul>
+        <li>OCUDU gNB (srsRAN Project lineage)</li>
+        <li>Band n40 <span>· ARFCN 470000 · PCI 1</span></li>
+        <li>Manual start only <span>· never on air after a reboot</span></li>
+        <li>Metrics stream <span>· WebSocket → Grafana</span></li>
+        <li>On-air buttons <span>· in the web portal</span></li>
+      </ul>
+    </div>
+    <div class="node">
+      <div class="section-label">Core</div>
+      <ul>
+        <li>5G SA <span>· AMF · SMF · UPF · PCF</span></li>
+        <li>4G EPC <span>· MME · HSS · PCRF</span></li>
+        <li>Subscribers in the WebUI <span>· :9999</span></li>
+        <li>Prometheus metrics from every function</li>
+        <li>Phones get 10.45.0.0/16 <span>· via ogstun</span></li>
+      </ul>
+    </div>
+    <div class="node">
+      <div class="section-label">On the same box</div>
+      <ul>
+        <li>Open Live <span>· vision mixing, guests</span></li>
+        <li>Open Intercom <span>· talkback + radio line</span></li>
+        <li>Grafana · ntopng · OpenWebRX+</li>
+        <li>Caddy + Authelia <span>· one login, HTTPS</span></li>
+        <li>Tailscale <span>· reachable from anywhere</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span class="n">23</span><span class="l">containers</span></div>
+    <div class="stat"><span class="n">2</span><span class="l">radios</span></div>
+    <div class="stat"><span class="n">1</span><span class="l">login</span></div>
+    <div class="stat"><span class="n">3</span><span class="l">ways in <i style="font-style:normal;font-family:var(--mono);font-size:16px;color:var(--faint)">(LAN · IP · tailnet, same ports)</i></span></div>
+    <div class="stat zero"><span class="n">0</span><span class="l">SIM cards so far <i>(on order)</i></span></div>
+  </div>
+
+  <div class="footer"><span><b>Obcell</b> · private 4G/5G cell + remote production</span><span>November 2026</span></div>
+</div></body></html>

@@ -1,0 +1,157 @@
+- name: GPU for Strom's GL compositor?
+  tags: [always]          # read-only; compose.yml.j2 needs these on any tag-limited run
+  ansible.builtin.stat:
+    path: /dev/dri
+  register: dri
+
+- name: GPU device groups
+  tags: [always]          # read-only; compose.yml.j2 needs these on any tag-limited run
+  ansible.builtin.getent:
+    database: group
+  check_mode: false
+
+- name: GPU facts
+  tags: [always]          # read-only; compose.yml.j2 needs these on any tag-limited run
+  ansible.builtin.set_fact:
+    obcell_gpu_dri: "{{ dri.stat.exists }}"
+    obcell_gpu_gids: "{{ ['video', 'render'] | select('in', ansible_facts.getent_group) | map('extract', ansible_facts.getent_group) | map(attribute=1) | list }}"
+
+- name: Open Live directories
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/openlive/{{ item }}"
+    state: directory
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0775"
+  loop: ["", caddy, rtmps-relay, graphics, data, data/strom]
+
+- name: Open Live + Studio source (v0.8.0 + local patches)
+  ansible.builtin.include_tasks: ../../common/tasks/git_patched.yml
+  vars:
+    repo: "{{ src_repo.repo }}"
+    dest: "{{ obcell_home }}/openlive/{{ src_repo.dir }}"
+    version: "{{ src_repo.version }}"
+    owner: "{{ obcell_user }}"
+    patches: "{{ src_repo.patches | map('regex_replace', '^', role_path ~ '/files/patches/') | list }}"
+  loop:
+    - {repo: "https://github.com/Eyevinn/open-live.git", dir: open-live, version: v0.8.0, patches: [open-live-trusted-hosts.patch]}
+    - {repo: "https://github.com/Eyevinn/open-live-studio.git", dir: open-live-studio, version: v0.8.0, patches: [open-live-studio-local-font.patch]}
+  loop_control:
+    loop_var: src_repo
+    label: "{{ src_repo.dir }}"
+
+- name: Remember whether the sources changed (rebuild images)
+  ansible.builtin.set_fact:
+    openlive_rebuild: "{{ openlive_rebuild | default(false) or git_patched_changed }}"
+
+- name: Studio fonts (IBM Plex Mono, SIL OFL; served locally instead of Google Fonts)
+  ansible.builtin.copy:
+    src: studio-fonts/
+    dest: "{{ obcell_home }}/openlive/open-live-studio/public/fonts/"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0664"
+  register: fonts
+
+- name: Secret files (.env, CREDENTIALS.txt; diff hidden)
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ obcell_home }}/openlive/{{ item.dest }}"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0600"
+  diff: false
+  loop:
+    - {src: env.j2, dest: .env}
+    - {src: CREDENTIALS.txt.j2, dest: CREDENTIALS.txt}
+  loop_control:
+    label: "{{ item.dest }}"
+
+- name: Stack files
+  tags: [frontdoor]
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ obcell_home }}/openlive/{{ item.dest }}"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "{{ item.mode | default('0664') }}"
+  loop:
+    - {src: compose.yml.j2, dest: compose.yml}
+    - {src: caddy/Caddyfile.j2, dest: caddy/Caddyfile}
+  loop_control:
+    label: "{{ item.dest }}"
+  register: stack_files
+  notify: Reload caddy
+
+- name: RTMPS relay
+  ansible.builtin.copy:
+    src: "rtmps-relay/{{ item }}"
+    dest: "{{ obcell_home }}/openlive/rtmps-relay/{{ item }}"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+  loop: [Dockerfile, relay.sh]
+  register: relay_src
+
+- name: RTMPS feed list (from secrets if present, else placeholders)
+  vars:
+    _feeds: >-
+      {{ lookup('ansible.builtin.file', obcell_secrets_dir ~ '/rtmps_feeds.conf')
+         if lookup('ansible.builtin.fileglob', obcell_secrets_dir ~ '/rtmps_feeds.conf')
+         else lookup('ansible.builtin.template', 'feeds.conf.j2') }}
+  no_log: true
+  ansible.builtin.copy:
+    content: "{{ _feeds | trim }}\n"
+    dest: "{{ obcell_home }}/openlive/rtmps-relay/feeds.conf"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0600"
+
+- name: Authelia config directory (root only, holds password hashes)
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/openlive/authelia"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Authelia config
+  ansible.builtin.template:
+    src: "authelia/{{ item }}.j2"
+    dest: "{{ obcell_home }}/openlive/authelia/{{ item }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop: [configuration.yml, users.yml]
+  register: authelia_cfg
+  diff: false
+
+- name: Stack up (front door, login, Open Live)
+  community.docker.docker_compose_v2:
+    project_src: "{{ obcell_home }}/openlive"
+    state: present
+    build: "{{ 'always' if (openlive_rebuild or fonts is changed or relay_src is changed) else 'policy' }}"
+    remove_orphans: false
+  register: openlive_up
+
+- name: Restart Authelia after config changes (it only reads config at start)
+  ansible.builtin.command: docker compose restart authelia
+  args:
+    chdir: "{{ obcell_home }}/openlive"
+  when: authelia_cfg is changed and not ansible_check_mode
+
+# Devices on the LAN must trust Caddy's internal CA; the monitoring probes need it too.
+- name: Wait for Caddy's root CA
+  ansible.builtin.wait_for:
+    path: /var/lib/docker/volumes/openlive_caddy_data/_data/caddy/pki/authorities/local/root.crt
+    timeout: 120
+  when: not ansible_check_mode
+
+- name: Publish the root CA (install it on LAN devices)
+  ansible.builtin.copy:
+    src: /var/lib/docker/volumes/openlive_caddy_data/_data/caddy/pki/authorities/local/root.crt
+    remote_src: true
+    dest: "{{ obcell_home }}/openlive/openlive-root-ca.crt"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0600"
+  failed_when: false

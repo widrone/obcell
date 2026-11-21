@@ -1,0 +1,16 @@
+diff --git a/src/main.ts b/src/main.ts
+index 9bf61d8..38c2854 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -37,7 +37,10 @@ async function main() {
+   // Without it, the activation endpoint derives the public WHIP URL from the raw
+   // X-Forwarded-Host header, which an attacker can forge to redirect camera streams
+   // to an attacker-controlled server (CVE category: host-header injection).
+-  if (!config.publicBaseUrl) {
++  // Local patch (Obcell): a TRUSTED_HOSTS allow-list also prevents host-header injection
++  // (resolvePublicBaseUrl rejects any other host), so it is accepted instead of a single
++  // PUBLIC_BASE_URL. This lets one deployment serve several hostnames (LAN + tailnet).
++  if (!config.publicBaseUrl && config.trustedHosts.length === 0) {
+     if (process.env['NODE_ENV'] === 'production') {
+       throw new Error(
+         'PUBLIC_BASE_URL must be set in production deployments. ' +

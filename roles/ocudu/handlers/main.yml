@@ -1,0 +1,8 @@
+- name: gNB config changed
+  ansible.builtin.systemd:
+    daemon_reload: true
+  notify: gNB restart hint
+
+- name: gNB restart hint
+  ansible.builtin.debug:
+    msg: "gNB config/unit changed. If the cell is on air, apply with: obcell offair && obcell onair"

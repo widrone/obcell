@@ -1,0 +1,187 @@
+- name: Monitoring directories
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/monitoring/{{ item }}"
+    state: directory
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0775"
+  loop: ["", prometheus, prometheus/rules, blackbox, homepage, homepage/images, homepage/images/presentation,
+         grafana, grafana/dashboards, grafana/dashboards/open5gs]
+
+- name: Static configs, exporters, dashboards
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ obcell_home }}/monitoring/{{ (item | dirname ~ '/') if '/' in item else '' }}"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: preserve           # keeps entrypoint.sh / ws_adapter.py executable
+  loop: [telegraf, sdr-exporter, ntopng-exporter, ntopng, grafana/provisioning, grafana/dashboards/ocudu, grafana/mkdash.py]
+  register: static_files
+
+- name: Blackbox probes config
+  ansible.builtin.copy:
+    src: blackbox.yml
+    dest: "{{ obcell_home }}/monitoring/blackbox/blackbox.yml"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+  notify: Reload blackbox
+
+- name: Secret files (.env, CREDENTIALS.txt; diff hidden)
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ obcell_home }}/monitoring/{{ item.dest }}"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0600"
+  diff: false
+  loop:
+    - {src: env.j2, dest: .env}
+    - {src: CREDENTIALS.txt.j2, dest: CREDENTIALS.txt}
+  loop_control:
+    label: "{{ item.dest }}"
+
+- name: Stack files
+  tags: [frontdoor]
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ obcell_home }}/monitoring/{{ item.dest }}"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "{{ item.mode | default(omit) }}"
+  loop:
+    - {src: compose.yml.j2, dest: compose.yml}
+    - {src: homepage/services.yaml.j2, dest: homepage/services.yaml}
+    - {src: homepage/settings.yaml.j2, dest: homepage/settings.yaml}
+    - {src: homepage/widgets.yaml.j2, dest: homepage/widgets.yaml}
+    - {src: homepage/bookmarks.yaml.j2, dest: homepage/bookmarks.yaml}
+    - {src: prometheus/prometheus.yml.j2, dest: prometheus/prometheus.yml}
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: Reload prometheus
+
+- name: Alert rules
+  ansible.builtin.template:
+    src: prometheus/rules/obcell.yml.j2
+    dest: "{{ obcell_home }}/monitoring/prometheus/rules/obcell.yml"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    variable_start_string: "[="
+    variable_end_string: "=]"
+    block_start_string: "[%"
+    block_end_string: "%]"
+    comment_start_string: "[#"
+    comment_end_string: "#]"
+  notify: Reload prometheus
+
+- name: Alert rules file from before the rename (Prometheus loads rules/*.yml, so it would double every alert)
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/monitoring/prometheus/rules/kit.yml"
+    state: absent
+  notify: Reload prometheus
+
+- name: Homepage placeholder files (Homepage creates/expects them)
+  ansible.builtin.copy:
+    content: ""
+    dest: "{{ obcell_home }}/monitoring/homepage/{{ item }}"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    force: false
+  loop: [custom.css, docker.yaml, kubernetes.yaml]
+
+- name: Homepage links follow the name the page was opened on
+  tags: [homepage, frontdoor]
+  ansible.builtin.template:
+    src: homepage/custom.js.j2
+    dest: "{{ obcell_home }}/monitoring/homepage/custom.js"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0664"
+
+- name: Presentation slides on Homepage
+  ansible.builtin.copy:
+    src: "presentation/{{ item | basename }}"
+    dest: "{{ obcell_home }}/monitoring/homepage/images/presentation/"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+  loop: "{{ lookup('ansible.builtin.fileglob', role_path ~ '/files/presentation/[0-9][0-9]-*.png', wantlist=True) | sort }}"
+  loop_control:
+    label: "{{ item | basename }}"
+
+- name: Render the Open5GS dashboard for this host (grafana/mkdash.py)
+  ansible.builtin.command: python3 -I {{ obcell_home }}/monitoring/grafana/mkdash.py /tmp/obcell-open5gs-dashboard.json
+  environment:
+    OBCELL_LAN_IFACE: "{{ obcell_lan_iface }}"
+    OBCELL_NAME: "{{ obcell_name }}"
+  changed_when: false
+  check_mode: false
+  when: not (ansible_check_mode and static_files is changed)
+
+- name: Open5GS dashboard
+  ansible.builtin.copy:
+    src: /tmp/obcell-open5gs-dashboard.json
+    remote_src: true
+    dest: "{{ obcell_home }}/monitoring/grafana/dashboards/open5gs/open5gs.json"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+  failed_when: false
+
+- name: LAN root CA for the front-door probe
+  ansible.builtin.copy:
+    src: /var/lib/docker/volumes/openlive_caddy_data/_data/caddy/pki/authorities/local/root.crt
+    remote_src: true
+    dest: "{{ obcell_home }}/monitoring/blackbox/lan-root-ca.crt"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0600"
+  failed_when: false
+  notify: Reload blackbox
+
+- name: Stack up (Prometheus, Grafana, InfluxDB, ntopng, Homepage, OpenWebRX, exporters)
+  community.docker.docker_compose_v2:
+    project_src: "{{ obcell_home }}/monitoring"
+    state: present
+    build: "{{ 'always' if static_files is changed else 'policy' }}"
+  register: monitoring_up
+
+- name: Restart exporters whose script changed (bind-mounted, read at start)
+  ansible.builtin.command: docker compose restart sdr-exporter ntopng-exporter
+  args:
+    chdir: "{{ obcell_home }}/monitoring"
+  when: static_files is changed and not ansible_check_mode
+
+# OpenWebRX keeps its receiver config (SDRs, profiles) in a volume: seed it once on a fresh install.
+- name: OpenWebRX settings present?
+  ansible.builtin.stat:
+    path: /var/lib/docker/volumes/monitoring_openwebrx_var/_data/settings.json
+  register: owrx_settings
+
+- name: Seed OpenWebRX receiver profiles (RTL-SDR)
+  when: rtlsdr_enabled | bool and (not owrx_settings.stat.exists or owrx_settings.stat.size < 100)
+  block:
+    - name: OpenWebRX settings.json
+      ansible.builtin.template:
+        src: openwebrx-settings.json.j2
+        dest: /var/lib/docker/volumes/monitoring_openwebrx_var/_data/settings.json
+        owner: "{{ owrx_settings.stat.uid | default(omit) }}"
+        group: "{{ owrx_settings.stat.gid | default(omit) }}"
+        mode: "0644"
+    - name: Restart OpenWebRX
+      ansible.builtin.command: docker compose restart openwebrx
+      args:
+        chdir: "{{ obcell_home }}/monitoring"
+
+- name: ntopng flow checks off
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3001/lua/rest/v2/disable/check.lua
+    method: POST
+    body_format: form-urlencoded
+    body:
+      check_subdir: flow
+      script_key: "{{ item }}"
+  loop: "{{ ntopng_disabled_flow_checks }}"
+  register: ntop_check
+  retries: 20
+  delay: 5
+  until: ntop_check.status == 200
+  changed_when: false
+  when: not ansible_check_mode

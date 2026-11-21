@@ -1,0 +1,23 @@
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://127.0.0.1:9095
+    isDefault: true
+    jsonData:
+      timeInterval: 5s
+  # Same name/uid as OCUDU's provisioning so its dashboards work unchanged.
+  - name: InfluxDB
+    type: influxdb
+    uid: JOSE3g9KVz
+    access: proxy
+    url: http://127.0.0.1:8086
+    secureJsonData:
+      token: unused-auth-disabled
+    jsonData:
+      version: SQL
+      dbName: ocudu
+      insecureGrpc: true
+      maxSeries: 100000

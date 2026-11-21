@@ -1,0 +1,90 @@
+# Restore the Obcell's *data* from an `obcell backup` archive onto a host the playbook has already set up
+# (configs come from site.yml; this brings back what only lived in databases/volumes):
+#   - Open5GS subscribers (SIM keys)     -> mongorestore (existing IMSIs are kept, not overwritten)
+#   - Open Live productions/settings     -> CouchDB open-live (same revisions as in the backup)
+#   - Caddy's internal root CA           -> devices that trust the old CA keep working
+#
+#   ansible-playbook restore.yml --limit <host> -e backup=~/obcell-backups/obcell-config-YYYYMMDD-HHMM.tar.gz
+- name: Restore Obcell data
+  hosts: obcell
+  become: true
+  vars:
+    work: /root/obcell-restore
+    caddy_pki: /var/lib/docker/volumes/openlive_caddy_data/_data/caddy
+  tasks:
+    - name: Backup archive given
+      ansible.builtin.assert:
+        that: backup is defined
+        fail_msg: "usage: ansible-playbook restore.yml --limit <host> -e backup=/path/to/obcell-config-....tar.gz"
+
+    - name: Right machine?
+      ansible.builtin.import_tasks: tasks/right_host.yml
+
+    - name: Work directory
+      ansible.builtin.file:
+        path: "{{ work }}"
+        state: directory
+        mode: "0700"
+
+    - name: Unpack the data members of the archive
+      ansible.builtin.unarchive:
+        src: "{{ backup }}"
+        dest: "{{ work }}"
+        include: [./open5gs-mongo.archive.gz, ./open-live-couchdb.json, ./caddy-pki.tar]
+
+    - name: Which parts are in this backup?
+      ansible.builtin.stat:
+        path: "{{ work }}/{{ item }}"
+      loop: [open5gs-mongo.archive.gz, open-live-couchdb.json, caddy-pki.tar]
+      register: parts
+
+    - name: Open5GS subscribers
+      ansible.builtin.command: mongorestore --quiet --gzip --archive={{ work }}/open5gs-mongo.archive.gz --nsInclude=open5gs.*
+      when: parts.results[0].stat.exists
+
+    - name: Open Live productions (CouchDB)
+      ansible.builtin.shell: |
+        set -e
+        python3 -I - "{{ work }}/open-live-couchdb.json" > {{ work }}/bulk.json <<'PY'
+        import json, sys
+        rows = json.load(open(sys.argv[1]))["rows"]
+        print(json.dumps({"new_edits": False, "docs": [r["doc"] for r in rows if "doc" in r]}))
+        PY
+        curl -sf -u "$U:$P" -X PUT http://127.0.0.1:5984/open-live >/dev/null || true
+        curl -sf -u "$U:$P" -H 'Content-Type: application/json' -X POST http://127.0.0.1:5984/open-live/_bulk_docs -d @{{ work }}/bulk.json >/dev/null
+      environment:
+        U: "{{ couchdb_user }}"
+        P: "{{ couchdb_password }}"
+      args:
+        executable: /bin/bash
+      when: parts.results[1].stat.exists
+
+    - name: Caddy root CA
+      when: parts.results[2].stat.exists
+      block:
+        - name: Stop Caddy
+          ansible.builtin.command: docker compose stop caddy
+          args:
+            chdir: "{{ obcell_home }}/openlive"
+        - name: Put the old PKI back
+          ansible.builtin.shell: rm -rf {{ caddy_pki }}/pki && tar -C {{ caddy_pki }} -xf {{ work }}/caddy-pki.tar
+        - name: Start Caddy
+          ansible.builtin.command: docker compose start caddy
+          args:
+            chdir: "{{ obcell_home }}/openlive"
+        - name: Republish the CA certificate
+          ansible.builtin.copy:
+            src: "{{ caddy_pki }}/pki/authorities/local/root.crt"
+            remote_src: true
+            dest: "{{ item }}"
+            owner: "{{ obcell_user }}"
+            group: "{{ obcell_user }}"
+            mode: "0600"
+          loop:
+            - "{{ obcell_home }}/openlive/openlive-root-ca.crt"
+            - "{{ obcell_home }}/monitoring/blackbox/lan-root-ca.crt"
+
+    - name: Clean up
+      ansible.builtin.file:
+        path: "{{ work }}"
+        state: absent

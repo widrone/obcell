@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+# obcell: day-to-day operations for the [= obcell_name =] Obcell (private 5G cell + remote production).
+# Run "obcell help". Runbook: ~/obcell/README.md
+set -uo pipefail
+
+PROM=http://127.0.0.1:9095
+TS_NAME=[= obcell_link_host =]
+declare -A STACK_DIR=([openlive]=$HOME/openlive [intercom]=$HOME/intercom [monitoring]=$HOME/monitoring)
+STACKS=(openlive intercom monitoring)
+BACKUP_DIR=$HOME/obcell-backups
+BACKUP_KEEP=[= obcell_backup_keep =]
+PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright/python:v1.48.0-jammy
+
+bold() { printf '\033[1m%s\033[0m' "$*"; }
+red() { printf '\033[31m%s\033[0m' "$*"; }
+green() { printf '\033[32m%s\033[0m' "$*"; }
+yellow() { printf '\033[33m%s\033[0m' "$*"; }
+die() { echo "obcell: $*" >&2; exit 1; }
+lbl() { printf '\033[1m%-11s\033[0m ' "$1"; }
+
+# PromQL query -> first value (or "-" when Prometheus is down / no data).
+pq() {
+  curl -s -m 3 "$PROM/api/v1/query" --data-urlencode "query=$1" 2>/dev/null |
+    python3 -c 'import json,sys
+try:
+    r=json.load(sys.stdin)["data"]["result"]; v=float(r[0]["value"][1]) if r else 0
+    print(int(v) if v==int(v) else round(v,1))
+except Exception: print("-")'
+}
+
+confirm() {
+  [ "${ASSUME_YES:-0}" = 1 ] && return 0
+  read -r -p "$1 [y/N] " a; [[ "$a" =~ ^[yY] ]]
+}
+
+compose() { local s=$1; shift; (cd "${STACK_DIR[$s]}" && sudo docker compose "$@"); }
+
+stack_args() {  # "all" or a stack name -> list of stacks
+  case "${1:-all}" in
+    all) echo "${STACKS[@]}" ;;
+    openlive|intercom|monitoring) echo "$1" ;;
+    *) die "unknown stack '$1' (openlive, intercom, monitoring, all)" ;;
+  esac
+}
+
+# ---------------------------------------------------------------- status
+cmd_status() {
+  local unit enabled cell phones lime
+  unit=$(systemctl show [= gnb_unit =] -p ActiveState --value)
+  enabled=$(systemctl is-enabled [= gnb_unit =] 2>/dev/null)
+  cell=$(pq 'sum(gnb{nf="amf"}) or vector(0)'); phones=$(pq 'sum(ran_ue{nf="amf"}) or vector(0)')
+  lime=$(pq '[= ('sum(sdr_devices{kind="' ~ sdr.usb_kind ~ '"}) or vector(0)') if sdr.usb_kind else 'vector(1)' =]')
+  lbl '[= cell_label =] cell'
+  if [ "$unit" = active ] && [ "$cell" = 1 ]; then red "ON AIR"; elif [ "$unit" = active ] || [ "$unit" = activating ]; then yellow "STARTING ($unit, no AMF link yet)"; elif [ "$unit" = failed ]; then red "FAILED"; else green "off air"; fi
+  printf '  · phones %s · [= sdr.short =] %s · starts at boot: %s\n' "$phones" "$([ "$lime" = 1 ] && echo plugged in || red missing)" \
+    "$([ "$enabled" = enabled ] && yellow 'YES (transmits after a reboot)' || echo no)"
+
+  local o5 o5a
+  o5=$(systemctl list-units --all --plain --no-legend 'open5gs-*.service' | wc -l)
+  o5a=$(systemctl list-units --plain --no-legend --state=active 'open5gs-*.service' | wc -l)
+  lbl core; printf '%s/%s Open5GS services active' "$o5a" "$o5"
+  [ "$o5a" = "$o5" ] && echo || echo " $(red '← check: obcell logs open5gs-<nf>')"
+
+  lbl containers
+  for s in "${STACKS[@]}"; do
+    local run tot
+    run=$(sudo docker ps -q --filter "label=com.docker.compose.project=$s" | wc -l)
+    tot=$(sudo docker ps -aq --filter "label=com.docker.compose.project=$s" | wc -l)
+    printf '%s %s/%s  ' "$s" "$([ "$run" = "$tot" ] && echo "$run" || red "$run")" "$tot"
+  done; echo
+
+  local up cnt down alerts
+  up=$(pq 'sum(probe_success)'); cnt=$(pq 'count(probe_success)')
+  down=$(curl -s -m 3 "$PROM/api/v1/query" --data-urlencode 'query=probe_success == 0' 2>/dev/null |
+         python3 -c 'import json,sys
+try: print(" ".join(r["metric"]["service"] for r in json.load(sys.stdin)["data"]["result"]))
+except Exception: print("")')
+  lbl services; printf '%s/%s answering %s\n' "$up" "$cnt" "$([ -n "$down" ] && red "down: $down")"
+  alerts=$(curl -s -m 3 "$PROM/api/v1/alerts" 2>/dev/null | python3 -c 'import json,sys
+try:
+    a=[x for x in json.load(sys.stdin)["data"]["alerts"] if x["state"]=="firing"]
+    print("; ".join(x["annotations"].get("summary",x["labels"]["alertname"]) for x in a))
+except Exception: print("? (Prometheus not answering)")')
+  lbl alerts; printf '%s\n' "$([ -z "$alerts" ] && green none || red "$alerts")"
+
+  local ts
+  ts=$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin); print(d["BackendState"], d["Self"]["TailscaleIPs"][0])
+except Exception: print("not running")')
+  lbl radio; printf '%s\n' "$(curl -s -m 2 http://127.0.0.1:9104/status | python3 -c 'import json,sys
+d=json.load(sys.stdin); n=len(d["lines"]); ok=sum(l["connection"]=="connected" for l in d["lines"])
+if not d["enabled"]: print("feed switched off"); sys.exit()
+print(d["participant"], "into", n, "Radio line(s)" + ("" if ok==n else " (%d not connected)" % (n-ok)), "" if d["openwebrx_connected"] else "· OpenWebRX NOT connected")' 2>/dev/null || echo 'bridge not running (obcell up intercom)')"
+  lbl tailscale; printf '%s · https://%s\n' "$ts" "$TS_NAME"
+
+  lbl host; printf 'load %s · mem free %s · disk free %s · temp %s°C · up %s\n' \
+    "$(cut -d' ' -f1-3 /proc/loadavg)" "$(free -h | awk '/^Mem/{print $7}')" "$(df -h / | awk 'NR==2{print $4}')" \
+    "$(pq 'max(node_hwmon_temp_celsius)')" "$(uptime -p | sed 's/^up //')"
+}
+
+# ---------------------------------------------------------------- cell
+cmd_onair() {
+  echo "$(red '[= cell_label =] is licensed spectrum ([= cell_freq_label ~ ' MHz' =]).') Only transmit with a test permit, or cabled/shielded."
+  confirm "Put the [= cell_label =] cell ON AIR?" || die "cancelled"
+  sudo systemctl start [= gnb_unit =] || die "start failed: obcell logs gnb"
+  printf 'waiting for the NG link to the AMF'
+  for _ in $(seq 1 30); do
+    [ "$(pq 'sum(gnb{nf="amf"}) or vector(0)')" = 1 ] && { echo; green "ON AIR"; echo; return 0; }
+    [ "$(systemctl show [= gnb_unit =] -p ActiveState --value)" = failed ] && { echo; die "gNB failed: obcell logs gnb"; }
+    printf '.'; sleep 2
+  done
+  echo; yellow "gNB is running but the cell has not connected to the AMF after 60 s: obcell logs gnb"; echo
+}
+
+cmd_offair() {
+  confirm "Take the [= cell_label =] cell OFF AIR? Connected phones will drop." || die "cancelled"
+  sudo systemctl stop [= gnb_unit =] && green "off air" && echo
+}
+
+cmd_boot_onair() {
+  case "${1:-}" in
+    on) sudo systemctl enable [= gnb_unit =] && echo "gNB will start (and transmit) at boot." ;;
+    off) sudo systemctl disable [= gnb_unit =] && echo "gNB stays off after a reboot; use 'obcell onair' or the Homepage buttons." ;;
+    *) echo "starts at boot: $(systemctl is-enabled [= gnb_unit =])  (obcell boot-onair on|off)" ;;
+  esac
+}
+
+# ---------------------------------------------------------------- stacks
+cmd_up() { for s in $(stack_args "${1:-all}"); do echo "== $s"; compose "$s" up -d "${@:2}"; done; }
+
+# OpenWebRX -> Intercom radio feed (~/intercom/radio-bridge). The on/off switch lives in the bridge itself
+# (same switch as the Homepage tile) and is remembered across restarts.
+radio_post() {
+  curl -s -m 5 -X POST -H "Remote-User: $(id -un)@obcell" -H "Origin: obcell" "http://127.0.0.1:9104/$1" >/dev/null
+}
+cmd_radio() {
+  case "${1:-}" in
+    on|off)
+      if ! curl -s -m 2 -o /dev/null http://127.0.0.1:9104/status; then
+        compose intercom up -d radio-bridge >/dev/null 2>&1; sleep 3
+      fi
+      radio_post "$1" || die "radio bridge not reachable: obcell logs radio-bridge"
+      [ "$1" = on ] && { echo "radio feed ON (joins the Radio lines within a few seconds)"; sleep 4; } || echo "radio feed OFF (remembered; Homepage tile or 'obcell radio on' to resume)"
+      cmd_radio ;;
+    *) curl -s -m 3 http://127.0.0.1:9104/status | python3 -c 'import json,sys
+d=json.load(sys.stdin); t=d["tuning"] or {}
+if not d["enabled"]: print("radio feed: OFF  (obcell radio on, or the Homepage switch)"); sys.exit()
+print("radio feed: ON |", d["participant"], "| OpenWebRX", "connected" if d["openwebrx_connected"] else "NOT connected", "| profile", t.get("profile","-"))
+for l in d["lines"]: print("  line", l["line"], "-", l["connection"])
+if not d["lines"]: print("  no Intercom line named Radio: add one to a production" if d.get("radio_lines_found") == 0 else "  joining the Radio line(s)...")' 2>/dev/null || echo "radio feed: bridge not running  (obcell up intercom)" ;;
+  esac
+}
+cmd_stop() {
+  local t=${1:-}; [ -z "$t" ] && die "obcell stop <stack> [service...]   (stops, keeps containers; 'obcell up' starts again)"
+  for s in $(stack_args "$t"); do echo "== $s"; compose "$s" stop "${@:2}"; done
+}
+cmd_restart() {
+  local t=${1:-}; [ -z "$t" ] && die "obcell restart <stack> [service...]"
+  for s in $(stack_args "$t"); do echo "== $s"; compose "$s" restart "${@:2}"; done
+}
+cmd_ps() { for s in $(stack_args "${1:-all}"); do echo "== $s"; compose "$s" ps --format 'table {{.Service}}\t{{.Status}}'; done; }
+
+# ---------------------------------------------------------------- logs
+cmd_logs() {
+  local n=${1:-}; shift || true
+  [ -z "$n" ] && die "obcell logs <name> [-f]   e.g. gnb, open5gs-amfd, control, tailscale, caddy, authelia, open-live, strom, sfu, ntopng"
+  case "$n" in
+    gnb|[= gnb_unit =]) sudo journalctl -u [= gnb_unit =] -n 200 --no-pager "$@" ;;
+    control|[= control_unit =]) sudo journalctl -u [= control_unit =] -n 200 --no-pager "$@" ;;
+    tailscale|tailscaled) sudo journalctl -u tailscaled -n 100 --no-pager "$@" ;;
+    open5gs-*) sudo journalctl -u "$n" -n 200 --no-pager "$@" ;;
+    *)
+      local c
+      c=$(sudo docker ps -a --format '{{.Names}}' | grep -E -- "-${n}-[0-9]+$|^${n}$" | head -1)
+      [ -z "$c" ] && c=$(sudo docker ps -a --format '{{.Names}}' | grep -- "$n" | head -1)
+      [ -z "$c" ] && die "no container or service matching '$n'"
+      echo "== $c"; sudo docker logs --tail 200 "$@" "$c" ;;
+  esac
+}
+
+# ---------------------------------------------------------------- reload (validated)
+cmd_reload() {
+  case "${1:-}" in
+    caddy)
+      local out
+      out=$(compose openlive exec -T caddy caddy validate --config /etc/caddy/Caddyfile 2>&1) ||
+        { echo "$out" | grep -iE 'error|Error' | tail -5; die "Caddyfile invalid, not reloaded (~/openlive/caddy/Caddyfile)"; }
+      out=$(compose openlive exec -T caddy caddy reload --config /etc/caddy/Caddyfile 2>&1) ||
+        { echo "$out" | tail -5; die "caddy reload failed"; }
+      echo "caddy reloaded" ;;
+    authelia)
+      compose openlive restart authelia
+      for _ in $(seq 1 30); do [ "$(sudo docker inspect -f '{{.State.Health.Status}}' openlive-authelia-1)" = healthy ] && { echo "authelia healthy"; return 0; }; sleep 2; done
+      die "authelia not healthy: obcell logs authelia" ;;
+    prometheus)
+      sudo docker exec monitoring-prometheus-1 promtool check config /etc/prometheus/prometheus.yml >/dev/null || die "Prometheus config invalid, not reloaded"
+      sudo docker exec monitoring-prometheus-1 kill -HUP 1 && echo "prometheus reloaded (config + rules)" ;;
+    blackbox) curl -sf -X POST http://127.0.0.1:9115/-/reload && echo "blackbox reloaded" ;;
+    homepage) compose monitoring restart homepage && echo "homepage restarted (needed for new files under homepage/images)" ;;
+    grafana) compose monitoring restart grafana ;;
+    control)
+      python3 -c "import ast;ast.parse(open('$HOME/monitoring/[= control_unit =]/control.py').read())" || die "control.py has a syntax error"
+      sudo install -o root -g root -m 644 "$HOME/monitoring/[= control_unit =]/control.py" /opt/[= control_unit =]/control.py &&
+        sudo systemctl restart [= control_unit =] && echo "[= control_unit =] updated from ~/monitoring/[= control_unit =]/control.py" ;;
+    *) die "obcell reload caddy|authelia|prometheus|blackbox|homepage|grafana|control" ;;
+  esac
+}
+
+# ---------------------------------------------------------------- backup
+cmd_backup() {
+  local ts work out
+  ts=$(date +%Y%m%d-%H%M); work=$(mktemp -d); out=$BACKUP_DIR/obcell-config-$ts.tar.gz
+  mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
+  echo "collecting into $out"
+  # Databases with real content: Open5GS subscribers (SIM keys!) and Open Live productions/configs.
+  mongodump --quiet --db open5gs --archive="$work/open5gs-mongo.archive.gz" --gzip || echo "  ! mongodump failed"
+  sudo docker exec openlive-couchdb-1 sh -c 'curl -s -u "$COUCHDB_USER:$COUCHDB_PASSWORD" "http://127.0.0.1:5984/open-live/_all_docs?include_docs=true"' \
+    > "$work/open-live-couchdb.json" 2>/dev/null || echo "  ! couchdb export failed (is Open Live running?)"
+  # Local source patches (re-apply after git pull).
+  git -C "$HOME/openlive/open-live" diff > "$work/open-live-local.patch" 2>/dev/null
+  # Caddy's internal root CA (devices trust it; losing it means re-installing the CA everywhere).
+  sudo tar -C /var/lib/docker/volumes/openlive_caddy_data/_data/caddy -cf "$work/caddy-pki.tar" pki 2>/dev/null
+  sudo tar -czf "$out" \
+    --exclude='*/node_modules' --exclude='*/.git' \
+    -C / \
+    "${HOME#/}/openlive/compose.yml" "${HOME#/}/openlive/.env" "${HOME#/}/openlive/caddy" "${HOME#/}/openlive/authelia" \
+    "${HOME#/}/openlive/rtmps-relay" "${HOME#/}/openlive/graphics" "${HOME#/}/openlive/CREDENTIALS.txt" "${HOME#/}/openlive/openlive-root-ca.crt" \
+    "${HOME#/}/intercom/compose.yml" "${HOME#/}/intercom/.env" \
+    "${HOME#/}/monitoring" "${HOME#/}/presentation" "${HOME#/}/obcell" "${HOME#/}/[= gnb_config | basename =]" \
+    etc/open5gs etc/systemd/system/[= gnb_unit =].service etc/systemd/system/[= gnb_unit =].service.d etc/systemd/system/[= control_unit =].service etc/sudoers.d/[= control_unit =] \
+    etc/modprobe.d/blacklist-rtl-sdr.conf etc/udev/rules.d/99-usb2-roothub-no-autosuspend.rules opt/[= control_unit =] \
+    -C "$work" . 2>&1 | grep -v "Removing leading" || true
+  sudo chown "$(id -u):$(id -g)" "$out"; chmod 600 "$out"; sudo rm -rf "$work"
+  ls -1t "$BACKUP_DIR"/obcell-config-*.tar.gz | tail -n +$((BACKUP_KEEP + 1)) | xargs -r rm --
+  echo "done: $(du -h "$out" | cut -f1) · keeping the newest $BACKUP_KEEP in $BACKUP_DIR"
+  echo "contains secrets (SIM keys, passwords, CA key): copy it somewhere safe, not somewhere public."
+}
+
+# ---------------------------------------------------------------- slides
+cmd_slides() {
+  local dir=$HOME/presentation dest=$HOME/monitoring/homepage/images/presentation
+  local files=() f; for f in "$dir"/[0-9][0-9]-*.html; do files+=("$f"); done
+  [ ${#files[@]} -gt 0 ] || die "no slides in $dir"
+  echo "rendering ${#files[@]} slides with Playwright (first run downloads the browser, ~1 min)"
+  sudo docker run --rm --ipc host -v "$dir:$dir" "$PLAYWRIGHT_IMAGE" sh -c \
+    "pip install -q playwright==1.48.0 >/dev/null 2>&1; playwright install --with-deps chrome >/dev/null 2>&1; python -I $dir/render.py ${files[*]}" | tail -n ${#files[@]}
+  mkdir -p "$dest"; rm -f "$dest"/[0-9][0-9]-*.png; cp "$dir"/[0-9][0-9]-*.png "$dest"/
+  compose monitoring restart homepage >/dev/null 2>&1
+  echo "published to https://$TS_NAME/images/presentation/ (Homepage bookmarks → Presentation)"
+}
+
+cmd_help() {
+  cat <<EOF
+$(bold obcell) - operate the [= obcell_name =] Obcell (private 5G + remote production)          runbook: ~/obcell/README.md
+
+  obcell status                    one-screen health: cell, core, containers, services, alerts, Tailscale, host
+  obcell onair | offair            start / stop the [= cell_label =] cell (asks first; -y to skip)
+  obcell boot-onair [on|off]       whether the gNB starts (and transmits) after a reboot
+  obcell radio [on|off]            OpenWebRX audio into Intercom lines named "Radio" (status without argument)
+
+  obcell up [stack] [svc...]       start a stack (openlive | intercom | monitoring | all, default all)
+  obcell stop <stack> [svc...]     stop, keeping containers   ·  obcell restart <stack> [svc...]
+  obcell ps [stack]                container status
+  obcell logs <name> [-f]          gnb, open5gs-amfd, control, tailscale, or any container (caddy, open-live, sfu…)
+
+  obcell reload <what>             validated reload: caddy | authelia | prometheus | blackbox | homepage | grafana | control
+  obcell backup                    configs + Open5GS subscribers + Open Live productions + CA → ~/obcell-backups
+  obcell slides                    re-render ~/presentation/*.html to PNG and publish on Homepage
+EOF
+}
+
+[ "${1:-}" = "-y" ] && { ASSUME_YES=1; shift; }
+cmd=${1:-help}; shift || true
+[ "${1:-}" = "-y" ] && { ASSUME_YES=1; shift; }
+case "$cmd" in
+  status|st) cmd_status ;;
+  onair|on-air) cmd_onair ;;
+  offair|off-air) cmd_offair ;;
+  boot-onair) cmd_boot_onair "$@" ;;
+  radio) cmd_radio "$@" ;;
+  up|start) cmd_up "$@" ;;
+  stop|down) cmd_stop "$@" ;;
+  restart) cmd_restart "$@" ;;
+  ps) cmd_ps "$@" ;;
+  logs|log) cmd_logs "$@" ;;
+  reload) cmd_reload "$@" ;;
+  backup) cmd_backup ;;
+  slides) cmd_slides ;;
+  help|-h|--help) cmd_help ;;
+  *) cmd_help; exit 1 ;;
+esac

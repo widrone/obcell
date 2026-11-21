@@ -1,0 +1,21 @@
+- name: "Intercom productions ({{ production.name }})"
+  ansible.builtin.uri:
+    url: http://127.0.0.1:8000/api/v1/productionlist?limit=200
+    return_content: true
+  register: plist
+  retries: 20
+  delay: 3
+  until: plist.status == 200
+
+- name: "Create production {{ production.name }}"
+  ansible.builtin.uri:
+    url: http://127.0.0.1:8000/api/v1/production
+    method: POST
+    body_format: json
+    headers:
+      Origin: "https://{{ obcell_mdns_name }}:8443"
+    body:
+      name: "{{ production.name }}"
+      lines: "{{ production.lines | map('community.general.dict_kv', 'name') | list }}"
+  when: production.name not in (plist.json.productions | map(attribute='name') | list)
+  changed_when: true

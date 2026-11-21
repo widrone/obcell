@@ -1,0 +1,13 @@
+const imsi = "{{ item.imsi }}";
+if (db.subscribers.countDocuments({ imsi: imsi }) > 0) { print("exists " + imsi); } else {
+  const ambr = { downlink: { value: {{ item.ambr_bps | default(1000000000) }}, unit: 0 }, uplink: { value: {{ item.ambr_bps | default(1000000000) }}, unit: 0 } };
+  db.subscribers.insertOne({
+    schema_version: 1, imsi: imsi, msisdn: {{ item.msisdn | default([]) | to_json }}, imeisv: [], mme_host: [], mm_realm: [], purge_flag: [],
+    slice: [{ sst: {{ open5gs_sst }}, default_indicator: true, _id: new ObjectId(),
+      session: [{ name: "{{ item.apn | default('internet') }}", type: 3, _id: new ObjectId(), pcc_rule: [], ambr: ambr,
+        qos: { index: 9, arp: { priority_level: 8, pre_emption_capability: 1, pre_emption_vulnerability: 2 } } }] }],
+    security: { k: "{{ item.k }}", opc: "{{ item.opc }}", op: null, amf: "8000" },
+    ambr: ambr, access_restriction_data: 32, network_access_mode: 0, subscriber_status: 0,
+    operator_determined_barring: 0, subscribed_rau_tau_timer: 12, __v: 0 });
+  print("inserted " + imsi);
+}

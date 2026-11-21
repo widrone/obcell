@@ -1,0 +1,10 @@
+# Authelia users. Generate a hash with:
+#   sudo docker run --rm authelia/authelia:4.39 authelia crypto hash generate argon2 --password 'NEW'
+users:
+{% for u in authelia_users %}
+  {{ u.name }}:
+    disabled: false
+    displayname: "{{ u.displayname | default(u.name) }}"
+    password: "{{ lookup('ansible.builtin.file', obcell_secrets_dir ~ '/authelia_' ~ u.name ~ '.hash') }}"
+    email: {{ u.email | default(u.name ~ '@' ~ obcell_mdns_name) }}
+{% endfor %}

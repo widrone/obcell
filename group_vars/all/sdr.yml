@@ -1,0 +1,88 @@
+# One entry per supported radio. sdr_type in host_vars picks one.
+#   packages:        apt packages for drivers/tools
+#   myriadrf_ppa:    needs ppa:myriadrf/drivers (LimeSuite 23.x on Ubuntu 22.04)
+#   device_driver / device_args / otw_format: OCUDU ru_sdr settings
+#   soapy_clock_patch: OCUDU patch so UHD->Soapy devices without time/clock sources open
+#   uhd_images:      run uhd_images_downloader (USRP FPGA images)
+#   usb_kind:        sdr-exporter "kind" label (Homepage/alerts "plugged in"), "" = not a USB device
+sdr_profiles:
+  limesdr_mini:
+    short: LimeSDR
+    name: LimeSDR Mini
+    description: LimeSDR Mini (via UHD -> SoapySDR -> LimeSuite)
+    packages: [limesuite, limesuite-udev, liblimesuite-dev, soapysdr-tools, libsoapysdr-dev, uhd-soapysdr, libuhd-dev, uhd-host]
+    myriadrf_ppa: true
+    device_driver: uhd
+    device_args: "type=soapy,driver=lime{{ (',serial=' ~ sdr_serial) if sdr_serial else '' }}"
+    otw_format: sc16
+    tx_gain: 50
+    rx_gain: 40
+    soapy_clock_patch: true
+    uhd_images: false
+    cfo_compensation: true          # free-running TCXO
+    usb_kind: limesdr_mini
+  limesdr_usb:
+    short: LimeSDR
+    name: LimeSDR USB
+    description: LimeSDR USB (via UHD -> SoapySDR -> LimeSuite)
+    packages: [limesuite, limesuite-udev, liblimesuite-dev, soapysdr-tools, libsoapysdr-dev, uhd-soapysdr, libuhd-dev, uhd-host]
+    myriadrf_ppa: true
+    device_driver: uhd
+    device_args: "type=soapy,driver=lime{{ (',serial=' ~ sdr_serial) if sdr_serial else '' }}"
+    otw_format: sc16
+    tx_gain: 50
+    rx_gain: 40
+    soapy_clock_patch: true
+    uhd_images: false
+    cfo_compensation: true
+    usb_kind: limesdr_usb
+  usrp_b2xx:
+    short: USRP
+    name: USRP B2xx
+    description: Ettus USRP B200/B210/B200mini (native UHD)
+    packages: [libuhd-dev, uhd-host]
+    myriadrf_ppa: false
+    device_driver: uhd
+    device_args: "type=b200,num_recv_frames=64,num_send_frames=64{{ (',serial=' ~ sdr_serial) if sdr_serial else '' }}"
+    otw_format: sc12
+    tx_gain: 80
+    rx_gain: 40
+    soapy_clock_patch: false
+    uhd_images: true
+    cfo_compensation: false
+    usb_kind: usrp_b2xx
+  usrp_x3xx:
+    short: USRP
+    name: USRP X3xx
+    description: Ettus USRP X300/X310 (native UHD, 10 GbE)
+    packages: [libuhd-dev, uhd-host]
+    myriadrf_ppa: false
+    device_driver: uhd
+    device_args: "type=x300{{ (',addr=' ~ sdr_addr) if sdr_addr | default('') else '' }}"
+    otw_format: sc16
+    tx_gain: 20
+    rx_gain: 20
+    soapy_clock_patch: false
+    uhd_images: true
+    cfo_compensation: false
+    usb_kind: ""
+  zmq:
+    short: ZMQ
+    name: ZeroMQ
+    description: ZeroMQ virtual radio (no RF; for srsUE / software tests)
+    packages: [libzmq3-dev]
+    myriadrf_ppa: false
+    device_driver: zmq
+    device_args: "tx_port=tcp://127.0.0.1:2000,rx_port=tcp://127.0.0.1:2001,base_srate={{ cell.srate }}e6"
+    otw_format: ""
+    tx_gain: 0                      # OCUDU's ZMQ driver needs gains <= 0
+    rx_gain: 0
+    soapy_clock_patch: false
+    uhd_images: false
+    cfo_compensation: false
+    usb_kind: ""
+
+# derived: the selected profile
+sdr: "{{ sdr_profiles[sdr_type] }}"
+gnb_tx_gain: "{{ cell.tx_gain if cell.tx_gain is not none else sdr.tx_gain }}"
+gnb_rx_gain: "{{ cell.rx_gain if cell.rx_gain is not none else sdr.rx_gain }}"

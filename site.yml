@@ -1,0 +1,51 @@
+# Whole Obcell: ansible-playbook site.yml [--limit <host>] [--tags <role>] [--check --diff]
+- name: Secrets (control machine)
+  hosts: obcell
+  gather_facts: false
+  tags: [always]
+  tasks:
+    - name: Generate / load secrets
+      ansible.builtin.include_tasks: tasks/secrets.yml
+      args:
+        apply:
+          delegate_to: localhost
+          become: false
+
+- name: Obcell host
+  hosts: obcell
+  become: true
+  pre_tasks:
+    - name: Right machine?
+      tags: [always]
+      ansible.builtin.import_tasks: tasks/right_host.yml
+
+    - name: Usable CPUs (for the gNB / container split)
+      tags: [always]
+      ansible.builtin.command: awk '/^Cpus_allowed_list/ {print $2}' /proc/1/status
+      register: _cpus_allowed
+      changed_when: false
+      check_mode: false
+
+    - name: Remember usable CPUs
+      tags: [always]
+      ansible.builtin.set_fact:
+        obcell_cpus_detected: "{{ _cpus_allowed.stdout | obcell_cpu_list }}"
+  roles:
+    - {role: base, tags: [base]}
+    - {role: docker, tags: [docker]}
+    - {role: tailscale, tags: [tailscale], when: tailscale_enabled | bool}
+    - {role: open5gs, tags: [open5gs, core]}
+    - {role: sdr, tags: [sdr, ran]}
+    - {role: ocudu, tags: [ocudu, ran]}
+    - {role: srsue, tags: [srsue, ran], when: srsue_enabled | bool}
+    - {role: obcell_cli, tags: [cli]}
+    - {role: openlive, tags: [openlive, web], when: openlive_enabled | bool}
+    - {role: intercom, tags: [intercom, web], when: intercom_enabled | bool}
+    - {role: monitoring, tags: [monitoring, web], when: monitoring_enabled | bool}
+    - {role: cell_control, tags: [control, web]}
+  post_tasks:
+    - name: Leftovers from before the rename
+      tags: [cli]
+      ansible.builtin.import_role:
+        name: obcell_cli
+        tasks_from: retire_kit

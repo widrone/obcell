@@ -1,0 +1,54 @@
+# srsUE (srsRAN 4G) over ZeroMQ against the gNB: a software UE test bench, no RF.
+- name: srsUE build dependencies
+  ansible.builtin.apt:
+    name: [cmake, make, gcc, g++, pkg-config, libfftw3-dev, libmbedtls-dev, libsctp-dev, libboost-program-options-dev,
+           libconfig++-dev, libzmq3-dev]
+
+- name: srsRAN 4G source
+  ansible.builtin.include_tasks: ../../common/tasks/git_patched.yml
+  vars:
+    repo: "{{ srsran4g_repo }}"
+    dest: "{{ obcell_home }}/srsRAN_4G"
+    version: "{{ srsran4g_version }}"
+    owner: "{{ obcell_user }}"
+    patches: []
+
+- name: srsUE binary present?
+  ansible.builtin.stat:
+    path: "{{ obcell_home }}/srsRAN_4G/build/srsue/src/srsue"
+  register: srsue_bin
+
+- name: Build srsUE
+  ansible.builtin.shell: |
+    set -e
+    cmake -S {{ obcell_home }}/srsRAN_4G -B {{ obcell_home }}/srsRAN_4G/build -DCMAKE_BUILD_TYPE=Release
+    cmake --build {{ obcell_home }}/srsRAN_4G/build -j {{ ocudu_build_jobs }} --target srsue
+  become: true
+  become_user: "{{ obcell_user }}"
+  when: not srsue_bin.stat.exists or git_patched_changed | bool
+  async: 7200
+  poll: 30
+
+- name: ZMQ gNB config (band 3 FDD, pairs with ue_zmq.conf)
+  ansible.builtin.template:
+    src: gnb_zmq.yml.j2
+    dest: "{{ obcell_home }}/gnb_zmq.yml"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0664"
+
+- name: Load subscribers (test SIM for the UE)
+  ansible.builtin.include_vars:
+    file: "{{ obcell_secrets_dir }}/subscribers.yml"
+  when: lookup('ansible.builtin.fileglob', obcell_secrets_dir ~ '/subscribers.yml') | length > 0
+  no_log: true
+
+- name: srsUE config (holds the test SIM keys)
+  ansible.builtin.template:
+    src: ue_zmq.conf.j2
+    dest: "{{ obcell_home }}/ue_zmq.conf"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0600"
+  when: open5gs_subscribers | length > 0
+  diff: false

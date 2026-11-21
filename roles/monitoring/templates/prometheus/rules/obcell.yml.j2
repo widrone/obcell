@@ -1,0 +1,93 @@
+# Alert rules for the Obcell. Evaluated by Prometheus; shown in Grafana (Alerting > Alert rules)
+# and counted on the Homepage "Alerts" tile. No notifications are sent (no Alertmanager).
+groups:
+  - name: services
+    rules:
+      - alert: ServiceDown
+        expr: probe_success == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.service }} is not answering"
+          description: "Probe {{ $labels.instance }} has failed for 2 minutes."
+      - alert: MetricsTargetDown
+        expr: up{job!~"probe|radio-bridge"} == 0   # radio-bridge: see RadioFeedBroken
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "Metrics source {{ $labels.job }} {{ $labels.nf }}{{ $labels.instance }} is down"
+      - alert: CertificateExpiringSoon
+        expr: (probe_ssl_earliest_cert_expiry{service!="front-door-lan"} - time()) / 86400 < 14
+        for: 1h
+        labels: {severity: warning}
+        annotations:
+          summary: "Certificate for {{ $labels.service }} expires in {{ $value | humanize }} days"
+          description: "The LAN front door is excluded: Caddy's internal CA issues 12-hour certificates and renews them continuously."
+      - alert: SystemdUnitFailed
+        expr: obcell_unit_state{state="failed"} == 1
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.name }} has failed"
+      - alert: TailscaleDown
+        expr: obcell_unit_state{name="tailscaled.service",state="active"} == 0
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "Tailscale is not running: no remote access"
+
+  - name: radio
+    rules:
+      - alert: GnbRunningWithoutCore
+        expr: obcell_unit_state{name="[= gnb_unit =].service",state="active"} == 1 and on() (sum(gnb{nf="amf"}) or vector(0)) == 0
+        for: 3m
+        labels: {severity: critical}
+        annotations:
+          summary: "gNB is running but has no NG connection to the AMF (cell not usable)"
+[% if sdr.usb_kind %]
+      - alert: [= sdr.name | regex_replace('[^A-Za-z0-9]', '') | regex_replace('^LimeSDRMini$', 'LimeSdr') =]Missing
+        expr: (sum(sdr_devices{kind="[= sdr.usb_kind =]"}) or vector(0)) == 0
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "[= sdr.name =] is not plugged in: the [= cell_label =] cell cannot start"
+[% endif %]
+
+  - name: host
+    rules:
+      - alert: DiskAlmostFull
+        expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.10
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Root disk has {{ $value | humanizePercentage }} free"
+      - alert: MemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Only {{ $value | humanizePercentage }} memory available"
+      - alert: HostTooHot
+        expr: max(node_hwmon_temp_celsius) > 90
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Host temperature {{ $value }} C"
+      - alert: ServiceCoresSaturated
+        expr: avg(1 - rate(node_cpu_seconds_total{mode="idle",cpu=~"2|3"}[2m])) > 0.9
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Cores 2-3 (media, intercom, monitoring) are {{ $value | humanizePercentage }} busy"
+      - alert: RadioCoresSaturated
+        expr: avg(1 - rate(node_cpu_seconds_total{mode="idle",cpu=~"0|1"}[2m])) > 0.95
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Cores 0-1 (gNB) are {{ $value | humanizePercentage }} busy"
+      - alert: RadioFeedBroken
+        expr: radio_bridge_enabled == 1 and on() (radio_bridge_openwebrx_connected == 0 or on() radio_bridge_lines{state="other"} > 0)
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Radio into Intercom is switched on but not working (OpenWebRX disconnected or a Radio line not connected); obcell logs radio-bridge"

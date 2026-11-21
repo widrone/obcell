@@ -1,0 +1,66 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  .grid {
+    position: absolute; left: 96px; right: 96px; top: 300px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px 28px;
+  }
+  .grid .node { padding: 22px 26px 20px; display: flex; flex-direction: column; min-height: 268px; }
+  .grid .head { display: flex; justify-content: space-between; align-items: baseline; }
+  .grid .t { font-size: 24px; }
+  .grid .d { font-size: 18px; flex: 1; }
+  .effort { font-family: var(--mono); font-size: 14px; color: var(--faint); white-space: nowrap; margin-left: 12px; }
+  .effort b { color: var(--ink); font-weight: 600; letter-spacing: 2px; }
+  .grid .tagrow { margin-top: 6px; }
+  .area { font-family: var(--mono); font-size: 13px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+  .area.r { color: var(--accent); } .area.p { color: var(--muted); } .area.o { color: var(--teal); }
+  .footnote { position: absolute; left: 96px; right: 96px; top: 948px; }
+</style></head>
+<body><div class="slide">
+  <div class="kicker">05 / 05 · Next</div>
+  <h1>Where the Obcell could go next</h1>
+  <div class="sub">Ideas, roughly ordered by how soon they pay off. The effort marks are guesses, not promises.</div>
+
+  <div class="grid">
+    <div class="node accent">
+      <div class="area r">Radio</div>
+      <div class="head"><div class="t">First real phones on the cell</div><span class="effort"><b>●</b>○○</span></div>
+      <div class="d">Programmable SIMs into the HSS, then phones attach to n40. Phone cameras streaming SRT over our own 5G, straight into the mixer.</div>
+      <div class="tagrow"><span class="tag a">sysmoISIM</span><span class="tag a">SRT from phones</span></div>
+    </div>
+    <div class="node">
+      <div class="area p">Production</div>
+      <div class="head"><div class="t">Video gets priority</div><span class="effort"><b>●●</b>○</span></div>
+      <div class="d">Uplink-heavy TDD pattern for contribution video, plus Open5GS policies so talkback and camera feeds get their own quality classes.</div>
+      <div class="tagrow"><span class="tag">TDD UL slots</span><span class="tag">5QI / PCF</span></div>
+    </div>
+    <div class="node teal">
+      <div class="area o">Operations</div>
+      <div class="head"><div class="t">One button: show mode</div><span class="effort"><b>●</b>○○</span></div>
+      <div class="d">A single switch that brings up cell, mixer and intercom together. The alert rules exist; next they ring a phone when something drops off.</div>
+      <div class="tagrow"><span class="tag tl">Homepage</span><span class="tag tl">Grafana alerts → ntfy</span></div>
+    </div>
+    <div class="node">
+      <div class="area r">Radio</div>
+      <div class="head"><div class="t">See our own signal</div><span class="effort"><b>●</b>○○</span></div>
+      <div class="d">A HackRF or similar on the spectrum page to watch n40 directly; Rayhunter on a travel hotspot to watch the public networks around us.</div>
+      <div class="tagrow"><span class="tag">HackRF</span><span class="tag">EFF Rayhunter</span></div>
+    </div>
+    <div class="node">
+      <div class="area p">Field box</div>
+      <div class="head"><div class="t">Out of the lab</div><span class="effort"><b>●●●</b></span></div>
+      <div class="d">Band filter and amplifier, a GPS-locked clock for the radio, a flight case, battery power and bonded 4G/satellite backhaul to the home studio.</div>
+      <div class="tagrow"><span class="tag">GPSDO</span><span class="tag">n40 filter + PA</span><span class="tag">bonded backhaul</span></div>
+    </div>
+    <div class="node teal">
+      <div class="area o">Operations</div>
+      <div class="head"><div class="t">Rebuildable from scratch</div><span class="effort"><b>●●</b>○</span></div>
+      <div class="d">All configs in git, an install playbook, and a second box that can take over. The Obcell should survive a dropped laptop.</div>
+      <div class="tagrow"><span class="tag tl">git</span><span class="tag tl">Ansible</span><span class="tag tl">spare unit</span></div>
+    </div>
+  </div>
+
+  <div class="footnote note">Regulatory note: n40 is licensed spectrum. Every idea on this page starts with <b>a test permit or a shielded box</b>, <i>not with enthusiasm.</i></div>
+
+  <div class="footer"><span><b>Obcell</b> · private 4G/5G cell + remote production</span><span>November 2026</span></div>
+</div></body></html>

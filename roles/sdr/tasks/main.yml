@@ -1,0 +1,22 @@
+- name: "SDR: {{ sdr.description }}"
+  ansible.builtin.debug:
+    msg: "sdr_type={{ sdr_type }} driver={{ sdr.device_driver }} args={{ sdr.device_args }}"
+
+- name: MyriadRF drivers PPA (LimeSuite)
+  ansible.builtin.include_tasks: ../../common/tasks/ppa.yml
+  vars:
+    ppa: myriadrf/drivers
+  when: sdr.myriadrf_ppa and ansible_distribution_release == 'jammy'
+
+- name: SDR driver packages
+  ansible.builtin.apt:
+    name: "{{ sdr.packages }}"
+    update_cache: "{{ ppa_added is defined and ppa_added is changed }}"
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: USRP FPGA images
+  ansible.builtin.command: uhd_images_downloader
+  args:
+    creates: /usr/share/uhd/images
+  when: sdr.uhd_images

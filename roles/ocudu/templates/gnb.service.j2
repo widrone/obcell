@@ -1,0 +1,24 @@
+[Unit]
+Description=OCUDU gNB, band {{ cell_label }} {{ cell_freq_label }} MHz ({{ 'LimeSDR Mini' if sdr_type == 'limesdr_mini' else sdr.description }}) - config {{ gnb_config }}
+# The AMF must be up for NG setup; the gNB also retries on its own.
+Wants=network-online.target open5gs-amfd.service
+After=network-online.target open5gs-amfd.service open5gs-upfd.service
+
+[Service]
+Type=simple
+# UHD needs a home directory for its config lookup.
+Environment=HOME=/root
+ExecStart={{ ocudu_dir }}/build/apps/gnb/gnb -c {{ gnb_config }}
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+KillSignal=SIGINT
+TimeoutStopSec=30
+# Restart after crashes or if the {{ 'LimeSDR' if sdr_type.startswith('limesdr') else 'radio' }} wasn't ready yet at boot.
+Restart=on-failure
+RestartSec=15
+LimitRTPRIO=infinity
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target

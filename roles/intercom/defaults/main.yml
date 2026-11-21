@@ -1,0 +1,5 @@
+# Productions created on a fresh install (existing ones, matched by name, are left alone).
+# A line named "Radio" receives the OpenWebRX feed (radio bridge).
+intercom_productions:
+  - name: Crew
+    lines: [Talkback, Radio]

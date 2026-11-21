@@ -1,0 +1,29 @@
+# Leftovers from before the rename (the CLI lived in ~/kit). Runs after every role
+# (site.yml post_tasks), so the patch copies in ~/obcell/patches exist by then.
+# Only files that this playbook generated are removed; anything else in ~/kit stays.
+- name: Retire ~/kit (generated files from before the rename)
+  ansible.builtin.shell: |
+    cd "{{ obcell_home }}" && [ -d kit ] || exit 0
+    rm -f kit/kit kit/README.md
+    for p in kit/patches/*.patch; do
+      [ -f "$p" ] && cmp -s "$p" "obcell/patches/${p##*/}" && rm -f "$p"
+    done
+    rmdir kit/patches kit 2>/dev/null
+    [ -d kit ] && echo kept || echo removed
+  register: retire_kit
+  changed_when: retire_kit.stdout == 'removed'
+
+- name: Old `kit` alias, when it isn't wanted
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/.local/bin/kit"
+    state: absent
+  when: not obcell_legacy_kit_command | bool
+
+- name: Slide 2 from before the rename (now 02-the-obcell; "obcell slides" renders every NN-*.html)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ obcell_home }}/presentation/02-the-kit.html"
+    - "{{ obcell_home }}/presentation/02-the-kit.png"
+    - "{{ obcell_home }}/monitoring/homepage/images/presentation/02-the-kit.png"

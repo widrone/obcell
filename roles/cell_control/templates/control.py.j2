@@ -1,0 +1,175 @@
+"""On-air control for the [= cell_label =] cell (systemd unit [= gnb_unit =]), embedded in the Homepage portal.
+
+Serves a small page with ON AIR / OFF AIR buttons and live status on 127.0.0.1:9103. Caddy exposes it at
+https://<host>:5443/control/ behind the Authelia login and passes the logged-in user as Remote-User.
+The only actions are: start, stop and query [= gnb_unit =] (via `sudo -n systemctl`).
+
+/metrics (no login, read-only, loopback only) reports the state of the Obcell's systemd services for Prometheus,
+because node-exporter in Docker cannot reach systemd over D-Bus (AppArmor).
+"""
+import json
+import subprocess
+import time
+import urllib.parse
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+UNIT = "[= gnb_unit =]"
+LISTEN = ("127.0.0.1", 9103)
+PROMETHEUS = "http://127.0.0.1:9095/api/v1/query"
+ALLOWED_ORIGINS = {[= obcell_portal_origins | map('to_json') | join(', ') =]}
+
+
+def systemctl(action, timeout=45):
+    """start/stop need root: allowed for exactly these two commands via /etc/sudoers.d/[= control_unit =]."""
+    r = subprocess.run(["sudo", "-n", "/usr/bin/systemctl", action, UNIT], capture_output=True, text=True, timeout=timeout)
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def unit_prop(prop):
+    r = subprocess.run(["systemctl", "show", UNIT, "-p", prop, "--value"], capture_output=True, text=True, timeout=5)
+    return r.stdout.strip() or "unknown"
+
+
+OBCELL_UNITS = ["[= gnb_unit =].service", "[= control_unit =].service", "tailscaled.service", "docker.service", "open5gs-*.service"]
+UNIT_STATES = ("active", "inactive", "activating", "deactivating", "failed", "reloading")
+
+
+def unit_metrics():
+    """Prometheus text: obcell_unit_state{name,state} (1 for the current state) and obcell_unit_enabled{name}."""
+    r = subprocess.run(["systemctl", "list-units", "--all", "--plain", "--no-legend", "--type=service", *OBCELL_UNITS],
+                       capture_output=True, text=True, timeout=10)
+    lines = ["# HELP obcell_unit_state systemd ActiveState of an Obcell service (1 = current state)",
+             "# TYPE obcell_unit_state gauge"]
+    names = []
+    for row in r.stdout.splitlines():
+        cols = row.split(None, 4)
+        if len(cols) < 4 or not cols[0].endswith(".service"):
+            continue
+        name, active = cols[0], cols[2]
+        names.append(name)
+        for st in UNIT_STATES:
+            lines.append(f'obcell_unit_state{{name="{name}",state="{st}"}} {1 if st == active else 0}')
+    lines += ["# HELP obcell_unit_enabled 1 if the service starts at boot", "# TYPE obcell_unit_enabled gauge"]
+    for name in names:
+        e = subprocess.run(["systemctl", "is-enabled", name], capture_output=True, text=True, timeout=5).stdout.strip()
+        lines.append(f'obcell_unit_enabled{{name="{name}"}} {1 if e == "enabled" else 0}')
+    return "\n".join(lines) + "\n"
+
+
+def prom(query):
+    url = PROMETHEUS + "?" + urllib.parse.urlencode({"query": query})
+    try:
+        with urllib.request.urlopen(url, timeout=3) as r:
+            res = json.load(r)["data"]["result"]
+        return float(res[0]["value"][1]) if res else 0.0
+    except Exception:
+        return None
+
+
+def status():
+    return {
+        "unit": unit_prop("ActiveState"),                                # active / inactive / activating / failed
+        "enabled_at_boot": unit_prop("UnitFileState"),
+        "cell_connected": prom('sum(gnb{nf="amf"})'),                   # 1 = NG setup with the AMF done
+        "phones": prom('sum(ran_ue{nf="amf"})'),
+        "lime_present": prom('[= ('sum(sdr_devices{kind="' ~ sdr.usb_kind ~ '"})') if sdr.usb_kind else 'vector(1)' =]'),
+        "since": unit_prop("ActiveEnterTimestamp"),
+        "time": time.strftime("%H:%M:%S"),
+    }
+
+
+PAGE = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>[= cell_label =] control</title><style>
+:root{color-scheme:dark}
+body{margin:0;font:14px/1.35 Inter,system-ui,sans-serif;background:transparent;color:#e5e7eb}
+.wrap{display:flex;gap:10px;align-items:stretch;padding:4px}
+.state{flex:1;border-radius:8px;padding:8px 12px;background:rgba(255,255,255,.05);min-width:0}
+.big{font-weight:800;font-size:18px;letter-spacing:.5px}
+.sub{color:#9ca3af;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.on .big{color:#f87171}.off .big{color:#9ca3af}.wait .big{color:#fbbf24}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:1px;background:#6b7280}
+.on .dot{background:#ef4444;box-shadow:0 0 10px #ef4444}.wait .dot{background:#f59e0b}
+button{border:0;border-radius:8px;font:700 14px Inter,system-ui,sans-serif;padding:0 16px;cursor:pointer;letter-spacing:.5px}
+#onair{background:#dc2626;color:#fff}#offair{background:#374151;color:#e5e7eb}
+button:disabled{opacity:.35;cursor:default}
+</style></head><body><div class="wrap">
+<div id="st" class="state off"><div class="big"><span class="dot"></span><span id="lbl">…</span></div><div class="sub" id="det">checking</div></div>
+<button id="onair" onclick="act('start')">ON AIR</button><button id="offair" onclick="act('stop')">OFF AIR</button>
+</div><script>
+let busy=false;
+async function refresh(){
+  try{const s=await (await fetch('status',{cache:'no-store'})).json();
+    const st=document.getElementById('st'),l=document.getElementById('lbl'),d=document.getElementById('det');
+    let cls='off',txt='OFF AIR';
+    if(s.unit==='active'&&s.cell_connected>=1){cls='on';txt='ON AIR';}
+    else if(s.unit==='active'||s.unit==='activating'||s.unit==='deactivating'){cls='wait';txt=s.unit==='deactivating'?'STOPPING':'STARTING';}
+    else if(s.unit==='failed'){cls='wait';txt='FAILED';}
+    st.className='state '+cls;l.textContent=txt;
+    d.textContent=(s.cell_connected>=1?'cell up · '+(s.phones||0)+' phones':'no cell')+' · unit '+s.unit+
+      ' · [= sdr.short =] '+(s.lime_present>=1?'ok':'MISSING')+' · boot '+s.enabled_at_boot;
+    if(!busy){document.getElementById('onair').disabled=(s.unit==='active'||s.unit==='activating');
+              document.getElementById('offair').disabled=(s.unit==='inactive'||s.unit==='failed');}
+  }catch(e){document.getElementById('det').textContent='control service unreachable';}
+}
+async function act(a){
+  if(a==='start'&&!confirm('Put the [= cell_label =] cell ON AIR ([= cell_freq_label ~ ' MHz' =])?\\n\\nOnly transmit with a licence/test permit, or cabled/shielded.'))return;
+  if(a==='stop'&&!confirm('Take the [= cell_label =] cell OFF AIR? Connected phones will drop.'))return;
+  busy=true;document.getElementById('onair').disabled=document.getElementById('offair').disabled=true;
+  document.getElementById('det').textContent=(a==='start'?'starting':'stopping')+'…';
+  try{const r=await fetch(a,{method:'POST'});const j=await r.json();if(!r.ok)alert(j.error||'failed');}
+  catch(e){alert('request failed');}
+  busy=false;refresh();
+}
+refresh();setInterval(refresh,3000);
+</script></body></html>"""
+
+
+class Handler(BaseHTTPRequestHandler):
+    def reply(self, code, body, ctype="application/json"):
+        data = body.encode() if isinstance(body, str) else json.dumps(body).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def authorised(self):
+        # Requests must come through Caddy + Authelia, which sets Remote-User.
+        return bool(self.headers.get("Remote-User"))
+
+    def do_GET(self):
+        if self.path == "/metrics":   # read-only service states for Prometheus; no login needed on loopback
+            return self.reply(200, unit_metrics(), "text/plain; version=0.0.4")
+        if not self.authorised():
+            return self.reply(403, {"error": "login required"})
+        path = self.path.split("?")[0]
+        if path in ("/", ""):
+            return self.reply(200, PAGE, "text/html; charset=utf-8")
+        if path == "/status":
+            return self.reply(200, status())
+        self.reply(404, {"error": "not found"})
+
+    def do_POST(self):
+        if not self.authorised():
+            return self.reply(403, {"error": "login required"})
+        if self.headers.get("Origin") not in ALLOWED_ORIGINS:   # cross-site request protection
+            return self.reply(403, {"error": "bad origin"})
+        action = self.path.split("?")[0].strip("/")
+        if action not in ("start", "stop"):
+            return self.reply(404, {"error": "not found"})
+        user = self.headers.get("Remote-User")
+        print(f"{time.strftime('%F %T')} {user} requested {action} {UNIT}", flush=True)
+        rc, out = systemctl(action)
+        print(f"  -> rc={rc} {out}", flush=True)
+        if rc != 0:
+            return self.reply(500, {"error": out or f"systemctl {action} failed"})
+        self.reply(200, {"ok": True, "status": status()})
+
+    def log_message(self, *args):
+        pass
+
+
+if __name__ == "__main__":
+    ThreadingHTTPServer(LISTEN, Handler).serve_forever()

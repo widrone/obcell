@@ -1,0 +1,77 @@
+- name: Supported OS
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == 'Ubuntu'
+      - ansible_distribution_release in obcell_supported_releases
+      - ansible_architecture in ['x86_64', 'aarch64']
+    fail_msg: >-
+      Ubuntu {{ ansible_distribution_version }} ({{ ansible_distribution_release }}) on {{ ansible_architecture }}
+      is not in obcell_supported_releases {{ obcell_supported_releases }} (x86_64/aarch64). Add it there to try anyway.
+
+- name: CPU layout is consistent
+  ansible.builtin.assert:
+    that:
+      - (gnb_cpus + container_cpus) | difference(obcell_cpus) | length == 0
+      - gnb_cpus | length > 0 and container_cpus | length > 0
+      - gnb_cpus | intersect(container_cpus) | length == 0
+    fail_msg: "gnb_cpus {{ gnb_cpus }} / container_cpus {{ container_cpus }} must be disjoint, non-empty and within usable CPUs {{ obcell_cpus | obcell_cpu_range }}"
+  when: cpu_pinning | bool
+
+- name: Base packages
+  ansible.builtin.apt:
+    name: [ca-certificates, curl, git, gnupg, rsync, python3, avahi-daemon, avahi-utils, libnss-mdns,
+           iptables, iptables-persistent, iperf3, tcpdump, usbutils, pciutils, lsof, net-tools,
+           build-essential, cmake, pkg-config, software-properties-common]
+    update_cache: true
+    cache_valid_time: 3600
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Hostname
+  ansible.builtin.hostname:
+    name: "{{ obcell_name }}"
+  when: obcell_set_hostname | bool
+
+- name: IP forwarding (phones' traffic goes ogstun -> LAN)
+  ansible.posix.sysctl:
+    name: net.ipv4.ip_forward
+    value: "1"
+    sysctl_set: true
+
+- name: NAT for the UE pool (live rule)
+  ansible.builtin.iptables:
+    table: nat
+    chain: POSTROUTING
+    source: "{{ ue_pool_v4 }}"
+    out_interface: "!ogstun"
+    jump: MASQUERADE
+
+# Only this rule is persisted: Docker and Tailscale install their own rules at start-up.
+# (Never "netfilter-persistent reload": restoring the nat table would flush Docker's NAT.)
+- name: NAT for the UE pool (at boot)
+  ansible.builtin.template:
+    src: rules.v4.j2
+    dest: /etc/iptables/rules.v4
+    mode: "0640"
+
+- name: mDNS (<name>.local) on the LAN interface only
+  ansible.builtin.lineinfile:
+    path: /etc/avahi/avahi-daemon.conf
+    regexp: '^#?allow-interfaces='
+    line: "allow-interfaces={{ obcell_lan_iface }}"
+    insertafter: '^\[server\]'
+  notify: Restart avahi
+
+- name: Keep the DVB-T driver off RTL-SDR dongles
+  ansible.builtin.copy:
+    src: blacklist-rtl-sdr.conf
+    dest: /etc/modprobe.d/blacklist-rtl-sdr.conf
+    mode: "0644"
+  when: rtlsdr_enabled | bool
+
+- name: USB2 root hub autosuspend quirk
+  ansible.builtin.copy:
+    src: 99-usb2-roothub-no-autosuspend.rules
+    dest: /etc/udev/rules.d/99-usb2-roothub-no-autosuspend.rules
+    mode: "0644"
+  when: usb2_roothub_no_autosuspend | bool

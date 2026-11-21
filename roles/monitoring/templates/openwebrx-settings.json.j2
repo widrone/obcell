@@ -1,0 +1,82 @@
+{
+    "receiver_name": "{{ obcell_name }} Obcell",
+    "receiver_location": "Mobile Obcell (5G + remote production)",
+    "receiver_asl": 0,
+    "photo_title": "RF check for the private {{ cell_label }} cell",
+    "photo_desc": "Spectrum receiver for interference checks before going on air.",
+    "sdrs": {
+        "rtlsdr": {
+            "name": "RTL-SDR",
+            "type": "rtl_sdr",
+            "enabled": true,
+            "ppm": 0,
+            "always-on": false,
+            "profiles": {
+                "fm": {
+                    "name": "FM broadcast 99-101 MHz",
+                    "center_freq": 100000000,
+                    "samp_rate": 2400000,
+                    "start_freq": 100000000,
+                    "start_mod": "wfm",
+                    "rf_gain": "auto"
+                },
+                "air": {
+                    "name": "Airband 118-120 MHz (AM)",
+                    "center_freq": 119200000,
+                    "samp_rate": 2400000,
+                    "start_freq": 118700000,
+                    "start_mod": "am",
+                    "rf_gain": "auto"
+                },
+                "pmr": {
+                    "name": "PMR446 walkie-talkies",
+                    "center_freq": 446100000,
+                    "samp_rate": 2400000,
+                    "start_freq": 446006250,
+                    "start_mod": "nfm",
+                    "rf_gain": "auto"
+                },
+                "ism433": {
+                    "name": "433 MHz ISM (sensors, remotes)",
+                    "center_freq": 433920000,
+                    "samp_rate": 2400000,
+                    "start_freq": 433920000,
+                    "start_mod": "ism",
+                    "rf_gain": "auto"
+                },
+                "lte800": {
+                    "name": "LTE band 20 downlink 800 MHz (view only)",
+                    "center_freq": 806000000,
+                    "samp_rate": 2400000,
+                    "start_freq": 806000000,
+                    "start_mod": "am",
+                    "rf_gain": "auto"
+                },
+                "pmse823": {
+                    "name": "PMSE wireless mics 823-832 MHz",
+                    "center_freq": 827500000,
+                    "samp_rate": 2400000,
+                    "start_freq": 827500000,
+                    "start_mod": "wfm",
+                    "rf_gain": "auto"
+                },
+                "mic863": {
+                    "name": "Licence-free mics/IEMs 863-865 MHz",
+                    "center_freq": 864000000,
+                    "samp_rate": 2400000,
+                    "start_freq": 864000000,
+                    "start_mod": "wfm",
+                    "rf_gain": "auto"
+                },
+                "adsb": {
+                    "name": "ADS-B aircraft 1090 MHz",
+                    "center_freq": 1090000000,
+                    "samp_rate": 2400000,
+                    "start_freq": 1090000000,
+                    "start_mod": "adsb",
+                    "rf_gain": "auto"
+                }
+            }
+        }
+    }
+}

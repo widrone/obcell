@@ -1,0 +1,67 @@
+# On-air buttons for Homepage (127.0.0.1:9103) + obcell_unit_state metrics. Runs as an unprivileged user that
+# may only start/stop the gNB unit.
+- name: Service user
+  ansible.builtin.user:
+    name: "{{ control_user }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+
+- name: Program directory
+  ansible.builtin.file:
+    path: "/opt/{{ control_unit }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Source copy (edit here + "obcell reload control")
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/monitoring/{{ control_unit }}"
+    state: directory
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0775"
+
+- name: control.py
+  ansible.builtin.template:
+    src: control.py.j2
+    dest: "{{ item.dest }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "{{ item.mode }}"
+    variable_start_string: "[="
+    variable_end_string: "=]"
+    block_start_string: "[%"
+    block_end_string: "%]"
+    comment_start_string: "[#"
+    comment_end_string: "#]"
+  loop:
+    - {dest: "/opt/{{ control_unit }}/control.py", owner: root, mode: "0644"}
+    - {dest: "{{ obcell_home }}/monitoring/{{ control_unit }}/control.py", owner: "{{ obcell_user }}", mode: "0664"}
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: Restart control
+
+- name: sudo rule (start/stop the gNB only)
+  ansible.builtin.template:
+    src: sudoers.j2
+    dest: "/etc/sudoers.d/{{ control_unit }}"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
+- name: Service unit
+  ansible.builtin.template:
+    src: control.service.j2
+    dest: "/etc/systemd/system/{{ control_unit }}.service"
+    mode: "0644"
+  notify: Restart control
+
+- name: Service running
+  ansible.builtin.systemd:
+    name: "{{ control_unit }}"
+    enabled: true
+    state: started
+    daemon_reload: true

@@ -1,0 +1,41 @@
+# Quick checks on every push / PR. The full install tests (hours, need LXD) run on the
+# test machine instead: tests/matrix.sh (see docs/testing.md).
+name: checks
+on:
+  push:
+  pull_request:
+
+jobs:
+  ansible:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 = Ubuntu 22.04's Python -> ansible-core 2.17; 3.12 / 3.14 = 24.04 / 26.04 -> 2.20
+        python: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Controller venv (same script an Obcell box uses)
+        run: ./bootstrap.sh
+      - name: ansible-core version
+        run: . ./activate && ansible --version
+      - name: Syntax check (Obcell inventory and test inventories)
+        run: |
+          . ./activate
+          ansible-playbook --syntax-check site.yml verify.yml restore.yml
+          ansible-playbook --syntax-check -i tests/lxd/inventory.yml site.yml
+          ansible-playbook --syntax-check -i tests/lxd/inventory-local.yml site.yml
+      - name: ansible-lint
+        run: . ./activate && ansible-lint
+      - name: Filter plugin unit tests
+        run: python3 -m unittest discover -s tests/unit -v
+
+  shell:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck
+        run: shellcheck -S warning -x bootstrap.sh install.sh tests/matrix.sh tests/lxd/*.sh

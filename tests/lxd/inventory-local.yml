@@ -1,0 +1,12 @@
+# Same test hosts as inventory.yml, for running Ansible *inside* the container against
+# itself (how a new box installs itself). Used by: OBCELL_TEST_CONTROLLER=inside run.sh ...
+all:
+  children:
+    obcell:
+      vars:
+        ansible_connection: local
+        ansible_python_interpreter: /usr/bin/python3
+      hosts:
+        obcell-jammy:
+        obcell-noble:
+        obcell-resolute:

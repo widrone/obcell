@@ -1,0 +1,6 @@
+# Install a vendor apt signing key as a dearmored keyring (vars: key_url, keyring).
+- name: "Signing key {{ keyring | basename }}"
+  ansible.builtin.shell:
+    cmd: "set -o pipefail; curl -fsSL '{{ key_url }}' | gpg --dearmor -o '{{ keyring }}' && chmod 644 '{{ keyring }}'"
+    executable: /bin/bash
+    creates: "{{ keyring }}"

@@ -1,0 +1,75 @@
+- name: OCUDU build dependencies
+  ansible.builtin.apt:
+    name: [cmake, make, gcc, g++, pkg-config, libfftw3-dev, libmbedtls-dev, libsctp-dev, libyaml-cpp-dev,
+           libgtest-dev, libzmq3-dev, libboost-program-options-dev]
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: OCUDU source at the pinned commit (+ local patches)
+  ansible.builtin.include_tasks: ../../common/tasks/git_patched.yml
+  vars:
+    repo: "{{ ocudu_repo }}"
+    dest: "{{ ocudu_dir }}"
+    version: "{{ ocudu_version }}"
+    owner: "{{ obcell_user }}"
+    patches: "{{ [role_path ~ '/files/ocudu-soapy-no-clock-sources.patch'] if sdr.soapy_clock_patch else [] }}"
+
+- name: gNB binary present?
+  ansible.builtin.stat:
+    path: "{{ ocudu_dir }}/build/apps/gnb/gnb"
+  register: gnb_bin
+
+- name: Build the gNB (first build ~30-60 min on 4 cores)
+  ansible.builtin.shell: |
+    set -e
+    cmake -S {{ ocudu_dir }} -B {{ ocudu_dir }}/build {{ ocudu_cmake_args }}
+    cmake --build {{ ocudu_dir }}/build -j {{ ocudu_build_jobs }} --target gnb
+  become: true
+  become_user: "{{ obcell_user }}"
+  when: not gnb_bin.stat.exists or git_patched_changed | bool
+  async: 10800
+  poll: 30
+
+- name: gNB configuration
+  ansible.builtin.template:
+    src: gnb.yml.j2
+    dest: "{{ gnb_config }}"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0664"
+  notify: gNB config changed
+
+- name: gNB service
+  ansible.builtin.template:
+    src: gnb.service.j2
+    dest: "/etc/systemd/system/{{ gnb_unit }}.service"
+    mode: "0644"
+  notify: gNB config changed
+
+- name: gNB CPU pinning drop-in directory
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ gnb_unit }}.service.d"
+    state: directory
+    mode: "0755"
+
+- name: gNB CPU pinning
+  ansible.builtin.template:
+    src: cpu-pinning.conf.j2
+    dest: "/etc/systemd/system/{{ gnb_unit }}.service.d/cpu-pinning.conf"
+    mode: "0644"
+  when: cpu_pinning | bool
+  notify: gNB config changed
+
+- name: No CPU pinning
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ gnb_unit }}.service.d/cpu-pinning.conf"
+    state: absent
+  when: not cpu_pinning | bool
+  notify: gNB config changed
+
+# Never started by the playbook: going on air is an operator decision (obcell onair / Homepage button).
+- name: gNB starts at boot only if gnb_start_at_boot
+  ansible.builtin.systemd:
+    name: "{{ gnb_unit }}"
+    enabled: "{{ gnb_start_at_boot | bool }}"
+    daemon_reload: true

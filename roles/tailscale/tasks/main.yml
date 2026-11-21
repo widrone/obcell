@@ -1,0 +1,52 @@
+- name: Tailscale apt key
+  ansible.builtin.command:
+    cmd: >-
+      curl -fsSL -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+      https://pkgs.tailscale.com/stable/ubuntu/{{ ansible_distribution_release }}.noarmor.gpg
+    creates: /usr/share/keyrings/tailscale-archive-keyring.gpg
+
+- name: Tailscale apt repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/tailscale.list
+    mode: "0644"
+    content: |
+      # Tailscale packages for ubuntu {{ ansible_distribution_release }}
+      deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu {{ ansible_distribution_release }} main
+  register: ts_repo
+
+- name: Tailscale package
+  ansible.builtin.apt:
+    name: tailscale
+    update_cache: "{{ ts_repo is changed }}"
+
+- name: tailscaled running
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: true
+    state: started
+
+- name: Tailnet state
+  ansible.builtin.command: tailscale status --json
+  register: ts_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Join the tailnet (unattended, with an auth key)
+  ansible.builtin.command: >-
+    tailscale up --authkey={{ tailscale_authkey }} --hostname={{ obcell_name }}
+    {{ ('--advertise-routes=' ~ tailscale_advertise_routes) if tailscale_advertise_routes else '' }}
+  no_log: true
+  when:
+    - tailscale_authkey | length > 0
+    - (ts_status.stdout | default('{}') | from_json).BackendState | default('') != 'Running'
+
+- name: Not on the tailnet yet
+  ansible.builtin.debug:
+    msg: >-
+      Run once on the host: sudo tailscale up --hostname={{ obcell_name }}
+      {{ ('--advertise-routes=' ~ tailscale_advertise_routes) if tailscale_advertise_routes else '' }}
+      and enable HTTPS certificates for the tailnet in the admin console. Then set obcell_tailnet_name.
+  when:
+    - tailscale_authkey | length == 0
+    - (ts_status.stdout | default('{}') | from_json).BackendState | default('') != 'Running'

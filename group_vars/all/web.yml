@@ -1,0 +1,14 @@
+# derived: names and origins for the web front door (Caddy + Authelia). Order matters only for readability.
+obcell_names: "{{ [obcell_mdns_name] + ([obcell_tailnet_name] if obcell_tailnet_name else []) }}"                 # hostnames
+obcell_names_ip: "{{ [obcell_mdns_name, obcell_lan_ip] + ([obcell_tailnet_name] if obcell_tailnet_name else []) }}"  # hostnames + LAN IP
+# Homepage portal: port-less names and :5443 on every name/IP.
+obcell_portal_hosts: >-
+  {{ [obcell_mdns_name, obcell_mdns_name ~ ':5443', obcell_lan_ip ~ ':5443']
+     + ([obcell_tailnet_name ~ ':5443', obcell_tailnet_name] if obcell_tailnet_name else []) }}
+obcell_portal_origins: "{{ obcell_portal_hosts | obcell_urls }}"
+
+# Container CPU fence, as a compose line (or a comment when pinning is off).
+container_cpuset_line: >-
+  {{ ('cpuset: "' ~ (container_cpus | join(',')) ~ '"') if cpu_pinning | bool else '# cpuset: not pinned (cpu_pinning: false)' }}
+gnb_cpu_range: "{{ gnb_cpus | obcell_cpu_range if cpu_pinning | bool else 'any' }}"
+container_cpu_range: "{{ container_cpus | obcell_cpu_range if cpu_pinning | bool else 'any' }}"

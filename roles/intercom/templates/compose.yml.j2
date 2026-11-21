@@ -1,0 +1,126 @@
+# Open Intercom (Eyevinn) self-hosted on {{ obcell_name }} ({{ obcell_lan_ip }}).
+#
+# Browser entry point: https://{{ obcell_mdns_name }}:8443 (served by the Caddy + Authelia login in ~/openlive).
+#   /api/*        -> manager   (127.0.0.1:8000)
+#   everything    -> frontend  (127.0.0.1:8082)
+# Audio flows browser <-> SFU directly over UDP {{ obcell_lan_ip }}:10000.
+#
+# manager/frontend are built from the cloned repos (manager 5faf97e, frontend 1009edc).
+# Secrets live in ./.env (chmod 600). Start: sudo docker compose up -d --build
+
+name: intercom
+
+services:
+  mongo:
+    image: mongo@sha256:884c055bff8b7144ca44830d01826facd3083b33c4dea44b94a1476c62de3c32 # mongo:7
+    restart: unless-stopped
+    # Keep off {{ 'cores ' ~ gnb_cpu_range }}, which the gNB needs for real-time processing.
+    {{ container_cpuset_line }}
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+    # No published port: host port 27017 belongs to Open5GS's MongoDB.
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Symphony Media Bridge. Host network so RTP reaches clients without Docker NAT.
+  sfu:
+    image: eyevinntechnology/wrtc-sfu@sha256:3fbee4a4b565620553162ec4ca350910040f55a3d7335838e5f2d455f4bf4688
+    restart: unless-stopped
+    network_mode: host
+    # Keep media work off {{ 'cores ' ~ gnb_cpu_range }}, which the gNB needs for real-time processing.
+    {{ container_cpuset_line }}
+    cap_add:
+      - SYS_NICE
+    ulimits:
+      rtprio: 99
+    environment:
+      HTTP_PORT: "8180"        # API-key-protected nginx in front of SMB
+      HTTP_BIND_PORT: "8181"   # SMB itself
+      UDP_PORT: "10000"
+      IPV4_ADDR: {{ obcell_lan_ip }}     # otherwise it looks up the public IP via ipinfo.io
+      API_KEY: ${SMB_APIKEY}
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+
+  manager:
+    build: ./intercom-manager
+    restart: unless-stopped
+    # Keep off {{ 'cores ' ~ gnb_cpu_range }}, which the gNB needs for real-time processing.
+    {{ container_cpuset_line }}
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+    depends_on:
+      mongo:
+        condition: service_healthy
+      sfu:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      PORT: "8000"
+      SMB_ADDRESS: http://host.docker.internal:8180
+      SMB_APIKEY: ${SMB_APIKEY}
+      DB_CONNECTION_STRING: mongodb://mongo:27017/intercom-manager
+      PUBLIC_HOST: https://{{ obcell_mdns_name }}:8443
+      CORS_ORIGIN: {{ obcell_names_ip | obcell_urls(8443) | join(',') }}
+      CSRF_TRUSTED_ORIGINS: {{ obcell_names_ip | obcell_urls(8443) | join(',') }}
+      # Only Caddy (on this host) can reach the published port, so trust its X-Forwarded-For.
+      TRUST_PROXY: "true"
+      # WHIP publishing (the radio bridge) needs this bearer token; /reauth stays open (no-op without OSC).
+      WHIP_AUTH_KEY: ${WHIP_AUTH_KEY}
+      REAUTH_AUTH_KEY: ""
+
+  frontend:
+    build: ./intercom-frontend
+    restart: unless-stopped
+    # Keep off {{ 'cores ' ~ gnb_cpu_range }}, which the gNB needs for real-time processing.
+    {{ container_cpuset_line }}
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+    depends_on:
+      - manager
+    ports:
+      - "127.0.0.1:8082:8080"
+    environment:
+      PORT: "8080"
+      MANAGER_URL: /   # same origin; Caddy routes /api/* to the manager
+
+  # OpenWebRX+ -> Intercom: publishes whatever the receiver is tuned to into every line named "Radio",
+  # as its own participant ("Radio 446.006 NFM"). On/off: Homepage switch (/radio/) or obcell radio on|off.
+  # Status: http://127.0.0.1:9104/status
+  radio-bridge:
+    build: ./radio-bridge
+    restart: unless-stopped
+    network_mode: host          # reaches OpenWebRX (127.0.0.1:8073), the manager (:8000) and the SFU (UDP 10000)
+    {{ container_cpuset_line }}
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+    depends_on:
+      - manager
+    environment:
+      WHIP_AUTH_KEY: ${WHIP_AUTH_KEY}
+      RADIO_LINE: Radio
+      RADIO_GAIN_DB: "0"
+    volumes:
+      - radio_state:/state      # on/off switch, survives restarts
+
+volumes:
+  mongo_data:
+  radio_state:

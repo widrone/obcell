@@ -1,0 +1,22 @@
+- name: Docker Engine + Compose v2 (Ubuntu packages)
+  ansible.builtin.apt:
+    name: "{{ ['docker.io', 'docker-compose-v2', 'docker-buildx'] + docker_extra_packages }}"
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Docker daemon settings
+  when: docker_daemon_config | length > 0
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: "{{ docker_daemon_config | to_nice_json }}\n"
+    mode: "0644"
+  notify: Restart docker
+
+- name: Docker running
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Apply daemon settings before any stack comes up
+  ansible.builtin.meta: flush_handlers

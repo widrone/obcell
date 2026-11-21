@@ -1,0 +1,4 @@
+[Service]
+# Local only: browsers reach it through Caddy + Authelia on :{{ open5gs_webui_https_port }}.
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT={{ open5gs_webui_port }}

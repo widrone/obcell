@@ -1,0 +1,6 @@
+# Extra packages and /etc/docker/daemon.json content. Empty = Docker's defaults
+# (no daemon.json is written). Example for nested/unprivileged containers:
+#   docker_extra_packages: [fuse-overlayfs]
+#   docker_daemon_config: {storage-driver: fuse-overlayfs}
+docker_extra_packages: []
+docker_daemon_config: {}

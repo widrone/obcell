@@ -1,0 +1,79 @@
+# Read-only health check of an Obcell host after a run: ansible-playbook verify.yml [--limit host]
+- name: Verify the Obcell
+  hosts: obcell
+  become: true
+  gather_facts: true
+  vars:
+    core_units: [mongod, open5gs-nrfd, open5gs-amfd, open5gs-smfd, open5gs-upfd, open5gs-ausfd, open5gs-udmd,
+                 open5gs-udrd, open5gs-pcfd, open5gs-mmed, open5gs-hssd, open5gs-webui]
+  tasks:
+    - name: Core services active
+      ansible.builtin.command: systemctl is-active {{ core_units | join(' ') }} {{ control_unit }} docker
+      changed_when: false
+
+    - name: gNB unit installed, not started at boot unless asked
+      ansible.builtin.command: systemctl is-enabled {{ gnb_unit }}
+      register: gnb_enabled
+      changed_when: false
+      failed_when: gnb_enabled.stdout not in (['enabled'] if gnb_start_at_boot else ['disabled'])
+
+    - name: Containers running
+      ansible.builtin.shell: |
+        set -e
+        for p in {{ ((['openlive'] if openlive_enabled else []) + (['intercom'] if intercom_enabled else []) + (['monitoring'] if monitoring_enabled else [])) | join(' ') }}; do
+          bad=$(docker ps -a --filter label=com.docker.compose.project=$p --format '{{ '{{' }}.Names{{ '}}' }} {{ '{{' }}.State{{ '}}' }}' | grep -v ' running$' || true)
+          [ -z "$bad" ] || { echo "$p: $bad"; exit 1; }
+          echo "$p: $(docker ps -q --filter label=com.docker.compose.project=$p | wc -l) running"
+        done
+      args:
+        executable: /bin/bash
+      register: ps
+      changed_when: false
+
+    - name: Local endpoints answer
+      ansible.builtin.uri:
+        url: "{{ item }}"
+        status_code: [200, 204, 301, 302, 401, 403]
+        validate_certs: false
+        follow_redirects: none
+      loop:
+        - http://127.0.0.1:9999/                       # Open5GS WebUI
+        - http://127.0.0.1:9095/-/ready                # Prometheus
+        - http://127.0.0.1:3300/api/health             # Grafana
+        - http://127.0.0.1:3002/api/healthcheck        # Homepage
+        - http://127.0.0.1:9091/api/health             # Authelia
+        - http://127.0.0.1:3000/health                 # Open Live API
+        - http://127.0.0.1:8000/                       # Intercom manager
+        - http://127.0.0.1:9103/status                 # on-air control
+        - "https://{{ obcell_lan_ip }}:8443/"             # front door (Caddy)
+      retries: 12
+      delay: 10
+      register: ep
+      until: ep is not failed
+
+    - name: Prometheus sees the core NFs
+      ansible.builtin.uri:
+        url: http://127.0.0.1:9095/api/v1/query?query=sum(up{job="open5gs"})
+        return_content: true
+      register: up
+      retries: 12
+      delay: 10
+      until: up.json.data.result | length > 0 and (up.json.data.result[0].value[1] | int) == 7
+
+    - name: Front door requires login
+      ansible.builtin.uri:
+        url: "https://{{ obcell_lan_ip }}:3443/"
+        validate_certs: false
+        follow_redirects: none
+        status_code: [302, 401]
+
+    - name: Subscribers provisioned
+      ansible.builtin.command: mongosh --quiet open5gs --eval 'print(db.subscribers.countDocuments())'
+      environment: {HOME: /root}
+      register: subs
+      changed_when: false
+      failed_when: subs.stdout | int < open5gs_subscribers | default([]) | length
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: "{{ ps.stdout_lines + ['open5gs NFs up: ' ~ up.json.data.result[0].value[1], 'subscribers: ' ~ subs.stdout] }}"

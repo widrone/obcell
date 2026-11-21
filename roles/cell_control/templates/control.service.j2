@@ -1,0 +1,15 @@
+[Unit]
+Description={{ cell_label }} on-air control for the Homepage portal (127.0.0.1:9103)
+After=network.target
+
+[Service]
+User={{ control_user }}
+Group={{ control_user }}
+ExecStart=/usr/bin/python3 -I /opt/{{ control_unit }}/control.py
+Restart=on-failure
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

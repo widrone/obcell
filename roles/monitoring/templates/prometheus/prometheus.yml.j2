@@ -1,0 +1,98 @@
+# Open5GS network functions expose Prometheus metrics on their own loopback addresses
+# (metrics: sections in /etc/open5gs/*.yaml).
+global:
+  scrape_interval: 5s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  - job_name: open5gs
+    static_configs:
+      - targets: ['127.0.0.5:9090']
+        labels: {nf: amf, rat: 5G}
+      - targets: ['127.0.0.4:9090']
+        labels: {nf: smf, rat: 4G/5G}
+      - targets: ['127.0.0.7:9090']
+        labels: {nf: upf, rat: 4G/5G}
+      - targets: ['127.0.0.13:9090']
+        labels: {nf: pcf, rat: 5G}
+      - targets: ['127.0.0.2:9090']
+        labels: {nf: mme, rat: 4G}
+      - targets: ['127.0.0.8:9090']
+        labels: {nf: hss, rat: 4G}
+      - targets: ['127.0.0.9:9090']
+        labels: {nf: pcrf, rat: 4G}
+  - job_name: host
+    static_configs:
+      - targets: ['127.0.0.1:9100']
+        labels: {host: {{ obcell_name }}}
+  - job_name: ntopng
+    # Each scrape costs ntopng ~1 s of CPU across 8 REST calls; 30 s keeps it light on {{ 'cores ' ~ container_cpu_range }}.
+    scrape_interval: 30s
+    scrape_timeout: 20s
+    static_configs:
+      - targets: ['127.0.0.1:9101']
+  - job_name: sdr
+    static_configs:
+      - targets: ['127.0.0.1:9102']
+  - job_name: openwebrx
+    static_configs:
+      - targets: ['127.0.0.1:8073']
+
+  # State of the Obcell's systemd services (gNB, Open5GS, control, Tailscale), from the {{ control_unit }} service.
+  - job_name: units
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['127.0.0.1:9103']
+
+  # OpenWebRX -> Intercom radio bridge (~/intercom/radio-bridge).
+  - job_name: radio-bridge
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['127.0.0.1:9104']
+
+  # Service probes via blackbox-exporter (../blackbox/blackbox.yml).
+  - job_name: probe
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    metrics_path: /probe
+    static_configs:
+      - targets: ['http://127.0.0.1:3000/health']
+        labels: {service: open-live-api, module: http_up}
+      - targets: ['http://127.0.0.1:8081/']
+        labels: {service: open-live-studio, module: http_up}
+      - targets: ['http://127.0.0.1:8080/health']
+        labels: {service: strom, module: http_up}
+      - targets: ['http://127.0.0.1:8000/']
+        labels: {service: intercom-manager, module: http_up}
+      - targets: ['http://127.0.0.1:8082/']
+        labels: {service: intercom-web, module: http_up}
+      - targets: ['http://127.0.0.1:8180/']
+        labels: {service: intercom-sfu, module: http_up}
+      - targets: ['http://127.0.0.1:9091/api/health']
+        labels: {service: authelia, module: http_up}
+      - targets: ['http://127.0.0.1:9999/']
+        labels: {service: open5gs-webui, module: http_up}
+      - targets: ['http://127.0.0.1:3002/api/healthcheck']
+        labels: {service: homepage, module: http_up}
+      - targets: ['http://127.0.0.1:8073/']
+        labels: {service: openwebrx, module: http_up}
+      - targets: ['http://127.0.0.1:9103/status']
+        labels: {service: {{ control_unit }}, module: http_up}
+{% if obcell_tailnet_name %}
+      - targets: ['https://{{ obcell_tailnet_name }}/']
+        labels: {service: front-door-tailnet, module: https_frontdoor}
+{% endif %}
+      - targets: ['https://{{ obcell_lan_ip }}:8443/']
+        labels: {service: front-door-lan, module: https_frontdoor_lan}
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [module]
+        target_label: __param_module
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 127.0.0.1:9115

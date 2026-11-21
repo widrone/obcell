@@ -1,0 +1,2 @@
+# ntopng flow checks switched off (noise on this kind of box). Stored in ntopng's Redis volume.
+ntopng_disabled_flow_checks: [ndpi_tls_not_carrying_https, ndpi_error_code_detected]

@@ -1,0 +1,91 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  .kicker, .note { --accent: #1f6f78; }
+  .kicker { color: var(--teal); }
+  .pipe {
+    position: absolute; left: 96px; right: 96px; top: 296px;
+    display: grid; grid-template-columns: 420px 1fr 330px 1fr 420px; grid-template-rows: repeat(5, 74px);
+    row-gap: 12px; align-items: center;
+  }
+  .src { padding: 12px 18px !important; display: flex; justify-content: space-between; align-items: baseline; }
+  .src .t { font-size: 20px !important; }
+  .src .m { margin-top: 0 !important; font-size: 14px !important; }
+  .store { grid-column: 3; padding: 20px 22px !important; }
+  .store .t { font-size: 24px !important; }
+  .view { grid-column: 5; padding: 20px 22px !important; }
+  .view .t { font-size: 24px !important; }
+  .conn { padding: 0 14px; }
+  .lower {
+    position: absolute; left: 96px; right: 96px; top: 760px;
+    display: grid; grid-template-columns: 1.15fr 1fr; gap: 40px;
+  }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 5px 0; font-size: 18px; border-bottom: 1px solid var(--line); }
+  td.p { font-family: var(--mono); font-size: 17px; color: var(--teal); width: 92px; font-weight: 600; }
+  td.w { color: var(--muted); font-size: 16px; font-family: var(--mono); text-align: right; }
+  .notes { display: flex; flex-direction: column; gap: 10px; }
+  .notes .note { font-size: 17px !important; padding-top: 2px; padding-bottom: 2px; }
+  .notes .note { border-left-color: var(--teal); font-size: 18px; }
+  .notes .note i { color: var(--teal); }
+</style></head>
+<body><div class="slide">
+  <div class="kicker">04 / 05 · Operations</div>
+  <h1>Knowing what the Obcell is doing</h1>
+  <div class="sub">Every layer reports in: radio, core, traffic, hardware and the airwaves. One portal links it all, behind one login.</div>
+
+  <div class="pipe">
+    <div class="node src" style="grid-column:1;grid-row:1"><span class="t">Open5GS core</span><span class="m">17 functions</span></div>
+    <div class="node src" style="grid-column:1;grid-row:2"><span class="t">Host &amp; SDR hardware</span><span class="m">node · usb</span></div>
+    <div class="node src" style="grid-column:1;grid-row:3"><span class="t">ntopng</span><span class="m">phones · LAN · nDPI</span></div>
+    <div class="node src" style="grid-column:1;grid-row:4"><span class="t">OpenWebRX+ (RTL-SDR)</span><span class="m">also → intercom</span></div>
+    <div class="node src accent" style="grid-column:1;grid-row:5"><span class="t">OCUDU gNB</span><span class="m">JSON over WebSocket</span></div>
+
+    <div class="conn" style="grid-column:2;grid-row:1"><div class="arrow teal"></div></div>
+    <div class="conn" style="grid-column:2;grid-row:2"><div class="arrow teal"></div></div>
+    <div class="conn" style="grid-column:2;grid-row:3"><div class="arrow teal"><span class="lbl">scrape every 5–30 s</span></div></div>
+    <div class="conn" style="grid-column:2;grid-row:4"><div class="arrow teal"></div></div>
+    <div class="conn" style="grid-column:2;grid-row:5"><div class="arrow"><span class="lbl">Telegraf</span></div></div>
+
+    <div class="node store teal" style="grid-row:1 / span 3; align-self: stretch;">
+      <div class="t">Prometheus</div><div class="d">Core, host, traffic and SDR metrics · 30 days · every web service probed</div>
+      <span class="tag tl">13 targets</span><span class="tag tl">13 probes</span><span class="tag tl">13 alert rules</span>
+    </div>
+    <div class="node store" style="grid-row:4 / span 2; align-self: stretch;">
+      <div class="t">InfluxDB 3</div><div class="d">Per-cell, per-phone radio metrics · read by Grafana</div>
+    </div>
+
+    <div class="conn" style="grid-column:4;grid-row:2"><div class="arrow teal"><span class="lbl">PromQL · SQL</span></div></div>
+    <div class="conn" style="grid-column:4;grid-row:4"><div class="arrow"><span class="lbl">live status</span></div></div>
+
+    <div class="node view teal" style="grid-row:1 / span 3; align-self: stretch;">
+      <div class="t">Grafana</div><div class="d">Reads both stores · core overview · radio (CQI, MCS, BLER) · traffic · host CPU per core</div>
+    </div>
+    <div class="node view dark" style="grid-row:4 / span 2; align-self: stretch;">
+      <div class="t">Homepage portal</div><div class="d">Every service with live status · Obcell health · on-air buttons for the n40 cell</div>
+    </div>
+  </div>
+
+  <div class="lower">
+    <div>
+      <div class="section-label" style="margin-bottom:8px">Front door · &lt;name&gt;.&lt;tailnet&gt;.ts.net · LAN: &lt;name&gt;.local, same ports</div>
+      <table>
+        <tr><td class="p">/</td><td>Homepage portal</td><td class="w">start here</td></tr>
+        <tr><td class="p">:7443</td><td>Open Live Studio</td><td class="w">mixer</td></tr>
+        <tr><td class="p">:8443</td><td>Open Intercom</td><td class="w">guests: no login</td></tr>
+        <tr><td class="p">:3443</td><td>Grafana</td><td class="w">dashboards</td></tr>
+        <tr><td class="p">:4443</td><td>ntopng</td><td class="w">traffic</td></tr>
+        <tr><td class="p">:6443</td><td>OpenWebRX+</td><td class="w">spectrum</td></tr>
+      </table>
+    </div>
+    <div class="notes">
+      <div class="section-label">Field notes</div>
+      <div class="note">Remote crew come in over <b>Tailscale</b>; intercom audio follows via a single-host route. <i>No ports open to the internet.</i></div>
+      <div class="note">USB port 4 tripped over-current at boot and has been <b>retired with honours</b>.</div>
+      <div class="note">The RTL-SDR hears aircraft at 1090 MHz, but not our own cell at 2350 MHz. <i>That one needs a HackRF.</i></div>
+      <div class="note">The radio feed was mute at first: the intercom read the <b>wrong fingerprint</b>. <i>Now it gets just one.</i></div>
+    </div>
+  </div>
+
+  <div class="footer"><span><b>Obcell</b> · private 4G/5G cell + remote production</span><span>November 2026</span></div>
+</div></body></html>

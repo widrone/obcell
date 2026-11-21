@@ -1,0 +1,7 @@
+- name: Restart Open5GS core
+  ansible.builtin.systemd:
+    name: "open5gs-{{ item }}d"
+    state: restarted
+  loop: [nrf, amf, smf, upf, mme]
+- name: Restart open5gs-webui
+  ansible.builtin.systemd: {name: open5gs-webui, state: restarted, daemon_reload: true}

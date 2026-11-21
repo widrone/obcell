@@ -1,0 +1,63 @@
+- name: Backups move to ~/obcell-backups (the folder was ~/kit-backups before the rename)
+  ansible.builtin.command: mv {{ obcell_home }}/kit-backups {{ obcell_home }}/obcell-backups
+  args:
+    creates: "{{ obcell_home }}/obcell-backups"
+    removes: "{{ obcell_home }}/kit-backups"
+
+- name: Obcell directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0775"
+  loop: ["{{ obcell_home }}/obcell", "{{ obcell_home }}/obcell/patches", "{{ obcell_home }}/.local/bin", "{{ obcell_home }}/presentation"]
+
+- name: Obcell CLI
+  ansible.builtin.template:
+    src: obcell.j2
+    dest: "{{ obcell_home }}/obcell/obcell"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0755"
+    variable_start_string: "[="
+    variable_end_string: "=]"
+    block_start_string: "[%"
+    block_end_string: "%]"
+    comment_start_string: "[#"
+    comment_end_string: "#]"
+
+- name: Runbook
+  tags: [frontdoor]
+  ansible.builtin.template:
+    src: README.md.j2
+    dest: "{{ obcell_home }}/obcell/README.md"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0664"
+
+- name: Obcell on PATH
+  ansible.builtin.file:
+    src: "{{ obcell_home }}/obcell/obcell"
+    dest: "{{ obcell_home }}/.local/bin/obcell"
+    state: link
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    force: true
+
+- name: Old command name `kit` (kept as an alias after the rename)
+  ansible.builtin.file:
+    src: "{{ obcell_home }}/obcell/obcell"
+    dest: "{{ obcell_home }}/.local/bin/kit"
+    state: link
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    force: true
+  when: obcell_legacy_kit_command | bool
+
+- name: Slides (source; "obcell slides" renders them to Homepage)
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/roles/monitoring/files/presentation/"
+    dest: "{{ obcell_home }}/presentation/"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"

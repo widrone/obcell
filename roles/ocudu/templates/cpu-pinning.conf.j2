@@ -1,0 +1,8 @@
+# Keep the gNB on logical CPUs {{ gnb_cpus | obcell_cpu_range }}; every container runs on {{ container_cpus | obcell_cpu_range }} (cpuset "{{ container_cpus | join(',') }}").
+# CPUAffinity: initial mask (OCUDU sizes its thread pools from it). AllowedCPUs: hard cgroup cpuset limit.
+{% if obcell_cpu_note | default('') %}
+# Note: {{ obcell_cpu_note }}
+{% endif %}
+[Service]
+CPUAffinity={{ gnb_cpus | join(' ') }}
+AllowedCPUs={{ gnb_cpus | obcell_cpu_range }}

@@ -1,0 +1,13 @@
+# Add a Launchpad PPA unless some sources file already points at it (vars: ppa = "owner/name").
+- name: "PPA {{ ppa }} already configured?"
+  ansible.builtin.shell: grep -rqs "ppa.launchpadcontent.net/{{ ppa }}/\|ppa.launchpad.net/{{ ppa }}/" /etc/apt/sources.list /etc/apt/sources.list.d/
+  register: _ppa_present
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: "PPA {{ ppa }}"
+  ansible.builtin.apt_repository:
+    repo: "ppa:{{ ppa }}"
+  when: _ppa_present.rc != 0
+  register: ppa_added

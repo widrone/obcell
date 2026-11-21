@@ -1,0 +1,84 @@
+# OCUDU gNB: single {{ 'TDD' if cell.band in [34, 38, 39, 40, 41, 46, 47, 48, 77, 78, 79] else 'FDD' }} cell, band {{ cell_label }}{{ (' (' ~ nr_band_ranges[cell.band] ~ ')') if cell.band in nr_band_ranges else '' }}, {{ cell.bandwidth_mhz }} MHz, {{ cell.scs_khz }} kHz SCS.
+{% if sdr_type in ['limesdr_mini', 'limesdr_usb'] %}
+# RF: {{ 'LimeSDR Mini' if sdr_type == 'limesdr_mini' else 'LimeSDR USB' }}{{ (' (serial ' ~ sdr_serial ~ ')') if sdr_serial else '' }} via UHD -> uhd-soapysdr -> SoapySDR lime.
+{% else %}
+# RF: {{ sdr.description }}.
+{% endif %}
+# Core: local Open5GS (AMF NGAP on {{ open5gs_amf_ngap_addr }}, PLMN {{ open5gs_mcc }}/{{ open5gs_mnc }}, TAC {{ open5gs_tac }}).
+#
+# Run: sudo ~/ocudu/build/apps/gnb/gnb -c ~/{{ gnb_config | basename }}
+#
+# NOTE: {{ cell_label }} is licensed spectrum. Only transmit with a licence/test permit, or cabled / in a shielded box.
+
+cu_cp:
+  amf:
+    addrs: {{ open5gs_amf_ngap_addr }}          # Open5GS AMF ngap.server address (/etc/open5gs/amf.yaml)
+    port: 38412
+    bind_addrs: 127.0.0.1
+    supported_tracking_areas:
+      - tac: {{ open5gs_tac }}
+        plmn_list:
+          - plmn: "{{ open5gs_mcc }}{{ open5gs_mnc }}"
+            tai_slice_support_list:
+              - sst: {{ open5gs_sst }}
+
+ru_sdr:
+  device_driver: {{ sdr.device_driver }}
+  device_args: {{ sdr.device_args }}
+  srate: {{ cell.srate }}               # {{ cell.bandwidth_mhz }} MHz @ {{ cell.scs_khz }} kHz SCS. Fallback: see bottom of file.
+{% if sdr.otw_format %}
+  otw_format: {{ sdr.otw_format }}
+{% endif %}
+{% if sdr_type in ['limesdr_mini', 'limesdr_usb'] %}
+  tx_gain: {{ gnb_tx_gain }}                # Lime gain range ~0-70 dB; start low, raise if UE can't see the cell.
+{% else %}
+  tx_gain: {{ gnb_tx_gain }}
+{% endif %}
+  rx_gain: {{ gnb_rx_gain }}
+
+cell_cfg:
+  dl_arfcn: {{ cell.dl_arfcn }}           # {{ '%.3f' | format(cell_freq_mhz | float) }} MHz{{ ', mid-band ' ~ cell_label if cell.band == 40 and cell.dl_arfcn == 470000 else '' }}
+  band: {{ cell.band }}
+  channel_bandwidth_MHz: {{ cell.bandwidth_mhz }}
+  common_scs: {{ cell.scs_khz }}
+  plmn: "{{ open5gs_mcc }}{{ open5gs_mnc }}"
+  tac: {{ open5gs_tac }}
+  pci: {{ cell.pci }}
+{% if sdr.cfo_compensation %}
+
+# The Lime's TCXO is not disciplined: let the PUSCH estimator compensate CFO.
+expert_phy:
+  pusch_channel_estimator_td_strategy: average
+  pusch_channel_estimator_cfo_compensation: true
+{% endif %}
+
+# Metrics for the monitoring stack (~/monitoring): JSON metrics over the remote-control WebSocket
+# (127.0.0.1:8001), read by Telegraf -> InfluxDB -> Grafana "OCUDU" dashboards. Bound to localhost
+# because remote_control also accepts control commands.
+metrics:
+  enable_json: true
+  layers:
+    enable_sched: true
+    enable_rrc: true
+    enable_ngap: true
+    enable_ru: true
+    enable_app_usage: true
+remote_control:
+  enabled: true
+  bind_addr: 127.0.0.1
+  port: 8001
+
+log:
+  filename: /tmp/gnb_{{ cell_label }}.log
+  all_level: warning
+
+pcap:
+  mac_enable: false
+  mac_filename: /tmp/gnb_{{ cell_label }}_mac.pcap
+  ngap_enable: false
+  ngap_filename: /tmp/gnb_{{ cell_label }}_ngap.pcap
+
+# Fallback if you see underflows/overflows ("U"/"O"/"L") over USB at 20 MHz:
+#   ru_sdr.srate: 11.52
+#   cell_cfg.channel_bandwidth_MHz: 10
+#   (keep common_scs: 30)

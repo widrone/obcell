@@ -1,0 +1,166 @@
+# ---------------------------------------------------------------- MongoDB (subscriber database)
+- name: MongoDB key
+  ansible.builtin.include_tasks: ../../common/tasks/apt_keyring.yml
+  vars:
+    key_url: "https://www.mongodb.org/static/pgp/server-{{ mongodb_version }}.asc"
+    keyring: "/usr/share/keyrings/mongodb-server-{{ mongodb_version }}.gpg"
+
+- name: MongoDB repository
+  ansible.builtin.copy:
+    dest: "/etc/apt/sources.list.d/mongodb-org-{{ mongodb_version }}.list"
+    mode: "0644"
+    content: >
+      deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-{{ mongodb_version }}.gpg ]
+      https://repo.mongodb.org/apt/ubuntu {{ mongodb_repo_release }}/mongodb-org/{{ mongodb_version }} multiverse
+  register: mongo_repo
+
+- name: Open5GS PPA
+  ansible.builtin.include_tasks: ../../common/tasks/ppa.yml
+  vars:
+    ppa: "{{ open5gs_ppa }}"
+
+- name: MongoDB + Open5GS packages
+  ansible.builtin.apt:
+    name: [mongodb-org, open5gs]
+    update_cache: "{{ mongo_repo is changed or ppa_added is changed }}"
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: MongoDB running
+  ansible.builtin.systemd:
+    name: mongod
+    enabled: true
+    state: started
+
+# ---------------------------------------------------------------- core configuration
+- name: Open5GS configuration (PLMN, TAC, UE pool)
+  ansible.builtin.template:
+    src: "{{ item }}.yaml.j2"
+    dest: "/etc/open5gs/{{ item }}.yaml"
+    mode: "0644"
+  loop: [amf, mme, nrf, smf, upf]
+  notify: Restart Open5GS core
+
+# ---------------------------------------------------------------- WebUI (subscribers / SIMs)
+- name: WebUI
+  when: open5gs_webui_enabled | bool
+  block:
+    - name: NodeSource key
+      ansible.builtin.include_tasks: ../../common/tasks/apt_keyring.yml
+      vars:
+        key_url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+        keyring: /usr/share/keyrings/nodesource.gpg
+
+    - name: NodeSource repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/nodesource.sources
+        mode: "0644"
+        content: |
+          Types: deb
+          URIs: https://deb.nodesource.com/node_{{ nodejs_major }}.x
+          Suites: nodistro
+          Components: main
+          Architectures: {{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}
+          Signed-By: /usr/share/keyrings/nodesource.gpg
+      register: node_repo
+
+    - name: Node.js
+      ansible.builtin.apt:
+        name: nodejs
+        update_cache: "{{ node_repo is changed }}"
+
+    - name: WebUI installed?
+      ansible.builtin.stat:
+        path: /usr/lib/node_modules/open5gs/server/index.js
+      register: webui
+
+    # Same steps as https://open5gs.org/open5gs/assets/webui/install, pinned to open5gs_version.
+    - name: Build the WebUI
+      when: not webui.stat.exists
+      block:
+        - name: WebUI build directory
+          ansible.builtin.tempfile:
+            state: directory
+            suffix: webui
+          register: webui_tmp
+
+        - name: Open5GS source
+          ansible.builtin.unarchive:
+            src: "https://github.com/open5gs/open5gs/archive/v{{ open5gs_version }}.tar.gz"
+            dest: "{{ webui_tmp.path }}"
+            remote_src: true
+
+        - name: npm clean-install && npm run build
+          ansible.builtin.shell: npm clean-install && npm run build
+          args:
+            chdir: "{{ webui_tmp.path }}/open5gs-{{ open5gs_version }}/webui"
+
+        - name: Install to /usr/lib/node_modules/open5gs
+          ansible.builtin.shell: |
+            mkdir -p /usr/lib/node_modules
+            mv {{ webui_tmp.path }}/open5gs-{{ open5gs_version }}/webui /usr/lib/node_modules/open5gs
+            chown -R open5gs:open5gs /usr/lib/node_modules/open5gs
+
+        - name: Default WebUI admin account (admin / 1423) if none exists
+          ansible.builtin.command: mongosh --quiet open5gs {{ webui_tmp.path }}/open5gs-{{ open5gs_version }}/docs/assets/webui/mongo-init.js
+          environment:
+            HOME: /root
+      always:
+        - name: Remove build directory
+          ansible.builtin.file:
+            path: "{{ webui_tmp.path }}"
+            state: absent
+          when: webui_tmp.path is defined
+
+    - name: WebUI service
+      ansible.builtin.template:
+        src: open5gs-webui.service.j2
+        dest: /lib/systemd/system/open5gs-webui.service
+        mode: "0644"
+      notify: Restart open5gs-webui
+
+    - name: WebUI drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/open5gs-webui.service.d
+        state: directory
+        mode: "0755"
+
+    - name: WebUI listen address/port
+      tags: [frontdoor]
+      ansible.builtin.template:
+        src: webui-listen.conf.j2
+        dest: /etc/systemd/system/open5gs-webui.service.d/listen.conf
+        mode: "0644"
+      notify: Restart open5gs-webui
+
+    - name: WebUI enabled
+      ansible.builtin.systemd:
+        name: open5gs-webui
+        enabled: true
+        state: started
+        daemon_reload: true
+
+# ---------------------------------------------------------------- SIMs
+- name: Load subscribers from secrets/<host>/subscribers.yml
+  ansible.builtin.include_vars:
+    file: "{{ obcell_secrets_dir }}/subscribers.yml"
+  when: lookup('ansible.builtin.fileglob', obcell_secrets_dir ~ '/subscribers.yml') | length > 0
+  no_log: true
+
+- name: Provision subscribers (insert only; the WebUI owns them afterwards)
+  ansible.builtin.command:
+    argv:
+      - mongosh
+      - --quiet
+      - open5gs
+      - --eval
+      - "{{ lookup('ansible.builtin.template', 'add_subscriber.js.j2') }}"
+  environment:
+    HOME: /root
+  loop: "{{ open5gs_subscribers }}"
+  loop_control:
+    label: "{{ item.imsi }}"
+  register: sub_add
+  changed_when: "'inserted' in sub_add.stdout"
+  no_log: true
+  when: not ansible_check_mode

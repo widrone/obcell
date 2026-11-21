@@ -1,0 +1,56 @@
+# OCUDU gNB for software testing with srsUE over ZeroMQ. No RF is transmitted.
+# Band 3 FDD, 20 MHz, 15 kHz SCS: the cell setup srsUE's 5G SA mode supports.
+# Pairs with ~/ue_zmq.conf. Do not run at the same time as ~/{{ gnb_config | basename }}.
+#
+# Run: sudo ~/ocudu/build/apps/gnb/gnb -c ~/gnb_zmq.yml
+
+cu_cp:
+  amf:
+    addrs: {{ open5gs_amf_ngap_addr }}
+    port: 38412
+    bind_addrs: 127.0.0.1
+    supported_tracking_areas:
+      - tac: {{ open5gs_tac }}
+        plmn_list:
+          - plmn: "{{ open5gs_mcc }}{{ open5gs_mnc }}"
+            tai_slice_support_list:
+              - sst: {{ open5gs_sst }}
+
+ru_sdr:
+  device_driver: zmq
+  device_args: tx_port=tcp://127.0.0.1:2000,rx_port=tcp://127.0.0.1:2001,base_srate=23.04e6
+  srate: 23.04
+  tx_gain: 0
+  rx_gain: 0
+
+cell_cfg:
+  dl_arfcn: 368500
+  band: 3
+  channel_bandwidth_MHz: 20
+  common_scs: 15
+  plmn: "{{ open5gs_mcc }}{{ open5gs_mnc }}"
+  tac: {{ open5gs_tac }}
+  pci: 1
+  pdcch:
+    common:
+      ss0_index: 0
+      coreset0_index: 12
+    dedicated:
+      ss2_type: common
+      dci_format_0_1_and_1_1: false
+  prach:
+    prach_config_index: 1
+  pdsch:
+    mcs_table: qam64
+  pusch:
+    mcs_table: qam64
+
+log:
+  filename: /tmp/gnb_zmq.log
+  all_level: warning
+
+pcap:
+  mac_enable: false
+  mac_filename: /tmp/gnb_zmq_mac.pcap
+  ngap_enable: false
+  ngap_filename: /tmp/gnb_zmq_ngap.pcap

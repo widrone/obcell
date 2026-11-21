@@ -1,0 +1,230 @@
+# Monitoring for the private 4G/5G network on {{ obcell_name }} ({{ obcell_lan_ip }}).
+#
+# Browser entry points (Caddy + Authelia login, config in ~/openlive/Caddyfile):
+#   https://{{ obcell_mdns_name }}:3443  or https://{{ obcell_lan_ip }}:3443  -> Grafana  (127.0.0.1:3300)
+#   https://{{ obcell_mdns_name }}:4443  or https://{{ obcell_lan_ip }}:4443  -> ntopng   (127.0.0.1:3001)
+#   https://{{ obcell_mdns_name }} (or :5443), https://{{ obcell_lan_ip }}:5443 -> Homepage portal (127.0.0.1:3002)
+#   https://{{ obcell_mdns_name }}:6443  or https://{{ obcell_lan_ip }}:6443  -> OpenWebRX+ (127.0.0.1:8073)
+#
+# Data flow:
+#   Open5GS AMF/SMF/UPF/MME/PCF  (127.0.0.x:9090 /metrics) --> Prometheus (127.0.0.1:9095) --> Grafana
+#   node-exporter (host CPU/mem/net, 127.0.0.1:9100)        --> Prometheus
+#   OCUDU gNB remote_control WebSocket (127.0.0.1:8001)     --> Telegraf --> InfluxDB 3 (127.0.0.1:8086) --> Grafana
+#   ogstun (all UE traffic, 4G and 5G) + {{ obcell_lan_iface }} (LAN)          --> ntopng
+#
+# Everything uses the host network but binds to 127.0.0.1 only (Open5GS metrics are on loopback addresses),
+# and runs on {{ 'cores ' ~ container_cpu_range }} to keep {{ 'cores ' ~ gnb_cpu_range }} free for the gNB.
+# Start: sudo docker compose up -d --build
+
+name: monitoring
+
+x-common: &common
+  restart: unless-stopped
+  network_mode: host
+  {{ container_cpuset_line }}
+  logging:
+    driver: local
+    options:
+      max-size: 10m
+
+services:
+  prometheus:
+    <<: *common
+    image: prom/prometheus@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.listen-address=127.0.0.1:9095
+    volumes:
+      # Directory mount: picks up edited files and rules/*.yml (reload: kill -HUP 1 or "obcell reload prometheus").
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+
+  node-exporter:
+    <<: *common
+    image: prom/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address=127.0.0.1:9100
+    volumes:
+      - /:/host:ro,rslave
+
+  influxdb:
+    <<: *common
+    image: influxdb@sha256:62276b5841c54271f8f61aa75754dd094ac8889e0e3df13143eb2efa2f3436e3 # 3.1.0-core (OCUDU's tested version)
+    user: "0:0"
+    command: >
+      --object-store=file --data-dir=/var/lib/influxdb3 --node-id=node0
+      --http-bind=127.0.0.1:8086 --without-auth
+    environment:
+      LOG_FILTER: error
+    volumes:
+      - influxdb_data:/var/lib/influxdb3
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8086/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # OCUDU's Telegraf build: subscribes to the gNB's JSON metrics over WebSocket, writes them to InfluxDB.
+  # Copied from ~/ocudu/docker/telegraf with the health endpoint bound to 127.0.0.1.
+  telegraf:
+    <<: *common
+    build: ./telegraf   # TELEGRAF_VERSION default 1.39.3 from OCUDU's Dockerfile
+    depends_on:
+      influxdb:
+        condition: service_healthy
+    environment:
+      WS_URL: 127.0.0.1:8001
+      TELEGRAF_INPUT_INTERVAL: 1s
+      TELEGRAF_OUTPUT_INTERVAL: 1s
+      TELEGRAF_BUFFER_LIMIT: "10000"
+      INFLUXDB3_EXTERNAL_URL: http://127.0.0.1:8086
+      INFLUXDB3_AUTH_TOKEN: unused-auth-disabled
+      INFLUXDB3_BUCKET: ocudu
+      INFLUXDB3_TESTBED: default
+      GNB_ID: gnb0
+
+  grafana:
+    <<: *common
+    image: grafana/grafana@sha256:f772d434e8fab0049deb2b1b30abd43342bcfca1537614aa8d36080232cf4283 # 13.2.1
+    environment:
+      GF_SERVER_HTTP_ADDR: 127.0.0.1
+      GF_SERVER_HTTP_PORT: "3300"
+      GF_SERVER_ROOT_URL: https://{{ obcell_mdns_name }}:3443/
+      GF_SERVER_ENFORCE_DOMAIN: "false"
+      # Authelia (via Caddy forward_auth) logs the user in; Grafana trusts its Remote-User header from localhost only.
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: Remote-User
+      GF_AUTH_PROXY_HEADER_PROPERTY: username
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_AUTH_PROXY_WHITELIST: 127.0.0.1
+      GF_AUTH_PROXY_HEADERS: Name:Remote-Name Email:Remote-Email
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_BASIC_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_PLUGINS_PLUGIN_ADMIN_ENABLED: "false"
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 1s
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/open5gs/open5gs.json
+      GF_LOG_LEVEL: warn
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+
+  # Per-phone traffic on ogstun (UE pool {{ ue_pool_v4 }}, shared by 4G and 5G sessions) and the LAN on {{ obcell_lan_iface }}.
+  ntopng:
+    <<: *common
+    image: ntop/ntopng@sha256:39f38e1408332640a267a26af236c92e93d0dae3e794e38b057fe721891d1c37 # 7.0 stable build
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    command:
+      - --community
+      - --interface=ogstun
+      - --interface={{ obcell_lan_iface }}
+      - --local-networks={{ ue_pool_v4 }}=5G-4G phones,{{ obcell_lan_cidr }}=LAN
+      - --http-port=127.0.0.1:3001
+      - --https-port=0
+      - --disable-login=1
+      - --dont-change-user
+      - --data-dir=/var/lib/ntopng
+    volumes:
+      - ntopng_data:/var/lib/ntopng
+      # ntopng keeps its settings (e.g. disabled checks) in the bundled Redis.
+      - ntopng_redis:/var/lib/redis
+      # Dead threat lists switched off (see ntopng/lists/README.txt).
+      - ./ntopng/lists/abuse_ch.list:/usr/share/ntopng/httpdocs/misc/lists/builtin/abuse_ch.list:ro
+      - ./ntopng/lists/stratosphere.list:/usr/share/ntopng/httpdocs/misc/lists/builtin/stratosphere.list:ro
+
+  # Publishes ntopng's REST data as Prometheus metrics (ntopng Community has no exporter of its own).
+  ntopng-exporter:
+    <<: *common
+    image: python@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89 # 3.12-alpine
+    depends_on:
+      - ntopng
+    command: ["python", "-u", "/app/exporter.py"]
+    environment:
+      NTOPNG_URL: http://127.0.0.1:3001
+      LISTEN_PORT: "9101"
+    volumes:
+      - ./ntopng-exporter/exporter.py:/app/exporter.py:ro
+
+  # Portal: one page with every service in the Obcell and its live status (Homepage).
+  homepage:
+    <<: *common
+    image: ghcr.io/gethomepage/homepage@sha256:019d8f063a7299e7c1c51ee4a70b692291809af3244894fbec2c2ac7d1f71b18 # v2.8.0
+    environment:
+      HOSTNAME: 127.0.0.1
+      PORT: "3002"
+      HOMEPAGE_ALLOWED_HOSTS: {{ obcell_portal_hosts | join(',') }}
+      PUID: "1000"
+      PGID: "1000"
+    volumes:
+      - ./homepage:/app/config
+      # Static files served by Homepage at /images/... (presentation slides).
+      - ./homepage/images:/app/public/images:ro
+
+  # Web SDR receiver / spectrum waterfall (OpenWebRX+) for an RTL-SDR dongle, e.g. to check the {{ cell_label }} band
+  # for interference. Only the SDR devices configured in its settings are opened; it must never be given
+  # the LimeSDR (the gNB uses it). Bridge network so the web port can be bound to localhost.
+  openwebrx:
+    image: slechev/openwebrxplus@sha256:c527062bdc85203c6050bbb2ed6f2e1750bb9eca2d75b03538779d7b20c4cded # v1.2.130
+    restart: unless-stopped
+    {{ container_cpuset_line }}
+    ports:
+      - "127.0.0.1:8073:8073"
+    # USB passthrough with hot-plug, so the dongle can be added later without recreating the container.
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - openwebrx_etc:/etc/openwebrx
+      - openwebrx_var:/var/lib/openwebrx
+    device_cgroup_rules:
+      - "c 189:* rmw"
+    tmpfs:
+      - /tmp/openwebrx
+    environment:
+      TZ: {{ obcell_timezone }}
+      OPENWEBRX_ADMIN_USER: admin
+      OPENWEBRX_ADMIN_PASSWORD: ${OPENWEBRX_ADMIN_PASSWORD}
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+
+  # Which SDR dongles are plugged in (RTL-SDR, LimeSDR, ...), from the host's /sys/bus/usb.
+  sdr-exporter:
+    <<: *common
+    image: python@sha256:c5ba3deef00c7758561a0f03c26f44f10589263d40e732b8748e0d1f38f6dd89 # 3.12-alpine
+    command: ["python", "-u", "/app/exporter.py"]
+    environment:
+      LISTEN_PORT: "9102"
+    volumes:
+      - ./sdr-exporter/exporter.py:/app/exporter.py:ro
+
+
+  # Answers "is it up?" for web services that have no metrics of their own (job "probe").
+  blackbox:
+    <<: *common
+    image: prom/blackbox-exporter@sha256:a50c4c0eda297baa1678cd4dc4712a67fdea713b832d43ce7fcc5f9bea05094d # v0.27.0
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+      - --web.listen-address=127.0.0.1:9115
+    volumes:
+      - ./blackbox:/etc/blackbox:ro
+
+volumes:
+  prometheus_data:
+  influxdb_data:
+  grafana_data:
+  ntopng_data:
+  ntopng_redis:
+  openwebrx_etc:
+  openwebrx_var:

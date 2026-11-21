@@ -1,0 +1,14 @@
+# Guard against configuring the wrong machine. With ansible_connection: local the playbook
+# changes the machine it runs on, so that machine must be the Obcell named in the inventory.
+# A new box whose hostname isn't the Obcell name yet: add -e obcell_confirm_host=<inventory name>.
+- name: Right machine?
+  ansible.builtin.assert:
+    that: >-
+      ansible_connection | default('ssh') != 'local'
+      or ansible_facts.hostname == obcell_name
+      or obcell_confirm_host | default('') == inventory_hostname
+    fail_msg: >-
+      This run would change THIS machine ({{ ansible_facts.hostname }}) as Obcell '{{ inventory_hostname }}'
+      (ansible_connection: local). If that is really what you want, add
+      -e obcell_confirm_host={{ inventory_hostname }}. To build a test Obcell, use tests/matrix.sh instead.
+    quiet: true

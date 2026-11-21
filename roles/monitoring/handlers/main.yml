@@ -1,0 +1,9 @@
+- name: Reload prometheus
+  ansible.builtin.shell: |
+    docker exec monitoring-prometheus-1 promtool check config /etc/prometheus/prometheus.yml >/dev/null && \
+    docker exec monitoring-prometheus-1 kill -HUP 1
+- name: Reload blackbox
+  ansible.builtin.uri:
+    url: http://127.0.0.1:9115/-/reload
+    method: POST
+  failed_when: false

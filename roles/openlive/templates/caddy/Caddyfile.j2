@@ -1,0 +1,220 @@
+{
+	# Local CA: clients must trust ~/openlive/openlive-root-ca.crt.
+	local_certs
+	skip_install_trust
+}
+
+# Open Live site body; {args[0]} is the public host[:port] the Studio app should call.
+(openlive_site) {
+	tls internal
+	log {
+		output stdout
+		format json
+	}
+
+	# Login portal.
+	handle /authelia* {
+		reverse_proxy 127.0.0.1:9091
+	}
+
+	# Guest invite flow: authenticated by per-invite tokens inside open-live.
+	@guest path /guest/* /api/v1/guests/* /health /ready
+	handle @guest {
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# Everything else requires an Authelia session; unauthenticated browsers are sent to the login page.
+	handle {
+		forward_auth 127.0.0.1:9091 {
+			uri /authelia/api/authz/forward-auth
+			copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+		}
+
+		@backend path /api/* /ws/* /documentation /documentation/*
+		handle @backend {
+			reverse_proxy 127.0.0.1:3000
+		}
+
+		# Studio: per-hostname backend URL, and the matching CSP connect-src for API + controller WebSocket.
+		handle /env-config.js {
+			header Content-Type "application/javascript; charset=utf-8"
+			header Cache-Control no-store
+			respond `window._env_ = {"OPEN_LIVE_URL":"https://{args[0]}"};` 200
+		}
+		handle {
+			reverse_proxy 127.0.0.1:8081 {
+				header_down Content-Security-Policy "connect-src 'self' https://{{ obcell_mdns_name }} wss://{{ obcell_mdns_name }}" "connect-src 'self' https://{args[0]} wss://{args[0]}"
+			}
+		}
+	}
+}
+
+# Open Live on :7443, on the LAN and the tailnet alike (:443 is the Homepage portal on both).
+https://{{ obcell_mdns_name }}:7443 {
+	import openlive_site {{ obcell_mdns_name }}:7443
+}
+
+{% if obcell_tailnet_name %}
+https://{{ obcell_tailnet_name }}:7443 {
+	import openlive_site {{ obcell_tailnet_name }}:7443
+}
+{% endif %}
+
+# Open Intercom (~/intercom), by hostname or IP address. Same login as above (Authelia has a cookie
+# domain for each); audio itself goes browser <-> SFU over UDP 10000.
+{{ obcell_names_ip | obcell_urls(8443) | join(', ') }} {
+	tls internal
+	log {
+		output stdout
+		format json
+	}
+
+	# Login portal for the IP address and the tailnet name (cookie authelia_url :8443/authelia).
+	handle /authelia* {
+		reverse_proxy 127.0.0.1:9091
+	}
+
+	# Guests (no login): the web app, plus only the API calls needed to find a production, join a
+	# line and talk. The manager does not enforce roles itself, so the split is enforced here.
+	@guest_read {
+		method GET HEAD
+		path_regexp ^/api/v1/(productionlist|production/[0-9]+(/line(/[0-9]+)?)?|heartbeat/[^/]+|session/[^/]+/name|share/[^/]+|preset(/[^/]+)?)/?$
+	}
+	@guest_participants {
+		method POST
+		path_regexp ^/api/v1/production/[0-9]+/line/[0-9]+/participants/?$
+	}
+	@guest_session_new {
+		method POST
+		path /api/v1/session /api/v1/session/ /api/v1/permissions
+	}
+	@guest_session_own {
+		method PATCH DELETE
+		path_regexp ^/api/v1/session/[^/]+(/video-source)?/?$
+	}
+	@guest_app {
+		not path /api/*
+	}
+	handle @guest_read {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle @guest_participants {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle @guest_session_new {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle @guest_session_own {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle @guest_app {
+		reverse_proxy 127.0.0.1:8082
+	}
+
+	# Everything else (create/edit/delete productions and lines, kick participants, ingests,
+	# share-link creation, WHIP/WHEP) requires the operator login.
+	handle {
+		forward_auth 127.0.0.1:9091 {
+			uri /authelia/api/authz/forward-auth
+			copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+		}
+
+		handle /api/* {
+			reverse_proxy 127.0.0.1:8000
+		}
+
+		handle {
+			reverse_proxy 127.0.0.1:8082
+		}
+	}
+}
+
+# Port-less IP and plain-http addresses go to the LAN portal (Homepage on https://{{ obcell_mdns_name }}).
+https://{{ obcell_lan_ip }}, http://{{ obcell_lan_ip }}, http://{{ obcell_mdns_name }} {
+	tls internal
+	redir https://{{ obcell_mdns_name }}{uri} 302
+}
+
+# Monitoring (~/monitoring): Grafana and ntopng, by hostname or IP address, operator login required.
+(monitoring_login) {
+	# Login portal on every port, so a login started here can finish here.
+	handle /authelia* {
+		reverse_proxy 127.0.0.1:9091
+	}
+}
+
+{{ obcell_names_ip | obcell_urls(3443) | join(', ') }} {
+	tls internal
+	import monitoring_login
+	handle {
+		forward_auth 127.0.0.1:9091 {
+			uri /authelia/api/authz/forward-auth
+			copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+		}
+		# Dashboard link to ntopng on the same host name the browser used.
+		redir /ntopng https://{host}:4443/
+		# Grafana trusts Remote-User (auth proxy); only Authelia may set it.
+		reverse_proxy 127.0.0.1:3300
+	}
+}
+
+{{ obcell_names_ip | obcell_urls(4443) | join(', ') }} {
+	tls internal
+	import monitoring_login
+	handle {
+		forward_auth 127.0.0.1:9091 {
+			uri /authelia/api/authz/forward-auth
+			copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+		}
+		reverse_proxy 127.0.0.1:3001
+	}
+}
+
+# Homepage portal (~/monitoring/homepage) and OpenWebRX+ spectrum receiver, operator login required.
+# Landing page: the port-less https://{{ obcell_mdns_name }} and https://{{ obcell_tailnet_name }} are Homepage too.
+# Its /authelia handler is the login portal for the {{ obcell_mdns_name }} cookie (authelia_url https://{{ obcell_mdns_name }}/authelia).
+{{ ((obcell_names_ip | obcell_urls(5443)) + (obcell_names | obcell_urls)) | join(', ') }} {
+	tls internal
+	import monitoring_login
+	handle {
+		forward_auth 127.0.0.1:9091 {
+			uri /authelia/api/authz/forward-auth
+			copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+		}
+		# {{ cell_label }} on-air control (Homepage tile); service only accepts requests carrying Remote-User.
+		handle_path /control/* {
+			reverse_proxy 127.0.0.1:9103
+		}
+		# Radio-into-Intercom on/off switch (Homepage tile); POSTs need Remote-User and our Origin.
+		handle_path /radio/* {
+			reverse_proxy 127.0.0.1:9104
+		}
+		reverse_proxy 127.0.0.1:3002
+	}
+}
+
+{{ obcell_names_ip | obcell_urls(6443) | join(', ') }} {
+	tls internal
+	import monitoring_login
+	handle {
+		forward_auth 127.0.0.1:9091 {
+			uri /authelia/api/authz/forward-auth
+			copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+		}
+		reverse_proxy 127.0.0.1:8073
+	}
+}
+
+# Open5GS WebUI (subscribers / SIM keys): operator login first, then the WebUI's own admin login.
+# The WebUI itself only listens on 127.0.0.1:{{ open5gs_webui_port }}.
+{{ obcell_names_ip | obcell_urls(open5gs_webui_https_port) | join(', ') }} {
+	tls internal
+	import monitoring_login
+	handle {
+		forward_auth 127.0.0.1:9091 {
+			uri /authelia/api/authz/forward-auth
+			copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+		}
+		reverse_proxy 127.0.0.1:{{ open5gs_webui_port }}
+	}
+}

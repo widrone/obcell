@@ -1,0 +1,15 @@
+diff --git a/src/index.css b/src/index.css
+index 315a21b..ca10780 100644
+--- a/src/index.css
++++ b/src/index.css
+@@ -1,4 +1,9 @@
+-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&display=swap');
++/* Local patch (Obcell): IBM Plex Mono served from /fonts (SIL OFL, see public/fonts/IBM-Plex-Mono-OFL.txt)
++   instead of Google Fonts, which the studio's own CSP (style-src/font-src 'self') blocks, and which is
++   unreachable when the kit runs offline. */
++@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2'); }
++@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2'); }
++@font-face { font-family: 'IBM Plex Mono'; font-style: normal; font-weight: 700; font-display: swap; src: url('/fonts/ibm-plex-mono-latin-700-normal.woff2') format('woff2'); }
+ @import "tailwindcss";
+ 
+ @theme {

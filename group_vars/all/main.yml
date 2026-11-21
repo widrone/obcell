@@ -1,0 +1,126 @@
+# Defaults for every Obcell host. Override per host in inventory/host_vars/<host>.yml.
+# Values marked "derived" are computed from the others; override them only when you need to.
+
+# ------------------------------------------------------------------ identity / network
+obcell_user: "{{ ansible_user | default(lookup('env', 'USER')) }}"   # owns the stack directories
+obcell_home: "/home/{{ obcell_user }}"
+obcell_name: "{{ inventory_hostname }}"            # hostname shown in titles, mDNS name <obcell_name>.local
+obcell_set_hostname: false                         # true: also set the OS hostname to obcell_name
+obcell_mdns_name: "{{ obcell_name }}.local"
+obcell_lan_iface: "{{ ansible_default_ipv4.interface }}"
+obcell_lan_ip: "{{ ansible_default_ipv4.address }}"
+obcell_lan_cidr: "{{ (ansible_default_ipv4.network ~ '/' ~ ansible_default_ipv4.netmask) | ansible.utils.ipaddr('net') }}"
+obcell_timezone: Etc/UTC                           # containers' TZ
+
+# Tailscale (optional). With an auth key the host joins the tailnet unattended; otherwise run
+# `sudo tailscale up` once by hand. obcell_tailnet_name = "<host>.<tailnet>.ts.net" ("" = no tailnet).
+tailscale_enabled: false
+tailscale_authkey: ""
+tailscale_advertise_routes: ""                  # e.g. "192.168.1.10/32", the box's LAN address (Intercom audio for tailnet clients)
+obcell_tailnet_name: ""
+
+# derived: every name/address the web front door answers on, and the one used for links.
+obcell_link_host: "{{ obcell_tailnet_name if obcell_tailnet_name else obcell_mdns_name }}"
+
+# ------------------------------------------------------------------ OS
+# Ubuntu LTS releases the playbook is tested on (tests/lxd/run.sh 22.04|24.04|26.04).
+obcell_supported_releases: [jammy, noble, resolute]
+
+# ------------------------------------------------------------------ CPU layout
+# The gNB gets its own CPUs; every container is fenced onto the rest (docker cpuset).
+# obcell_cpus = the CPUs this box may actually use (PID 1's affinity, detected each run; it
+# honours cgroup/LXD limits, offline CPUs and isolcpus, which /proc/cpuinfo counts don't).
+# Default: lower half of those for the gNB, upper half for containers (needs >= 4 CPUs).
+obcell_cpus: "{{ obcell_cpus_detected | default(range(ansible_processor_vcpus | int) | list) }}"
+cpu_pinning: "{{ obcell_cpus | length >= 4 }}"
+gnb_cpus: "{{ obcell_cpus[:(obcell_cpus | length // 2)] }}"
+container_cpus: "{{ obcell_cpus[(obcell_cpus | length // 2):] }}"
+
+# ------------------------------------------------------------------ 5G core (Open5GS)
+open5gs_ppa: open5gs/latest
+open5gs_version: "2.8.0"                        # WebUI source tag; packages come from the PPA
+open5gs_mcc: "999"
+open5gs_mnc: "70"                               # string: keeps leading zeros ("01")
+open5gs_tac: 1
+open5gs_sst: 1
+open5gs_network_full_name: Open5GS
+open5gs_network_short_name: Next
+ue_pool_v4: 10.45.0.0/16
+ue_pool_v4_gateway: 10.45.0.1
+open5gs_amf_ngap_addr: 127.0.0.5                # package default
+open5gs_webui_enabled: true
+open5gs_webui_port: 9999                        # local only (127.0.0.1); browsers use the front door below
+open5gs_webui_https_port: 9443                  # Caddy + Authelia in front of the WebUI
+nodejs_major: 20
+mongodb_version: "{{ '6.0' if ansible_distribution_release == 'jammy' else '8.0' }}"
+# MongoDB publishes its server per Ubuntu release. For releases it doesn't cover yet
+# (26.04 resolute, Nov 2026: only the client tools), the noble build installs and runs.
+mongodb_repo_release: "{{ ansible_distribution_release if ansible_distribution_release in ['jammy', 'noble'] else 'noble' }}"
+
+# SIMs to provision (inserted only if the IMSI is not in the database yet; the WebUI owns them after).
+# Keep keys out of git: put the real list in secrets/<host>/subscribers.yml (loaded by the open5gs role).
+open5gs_subscribers: []
+#  - imsi: "99970xxxxxxxxxx"     # MCC 999 + MNC 70 + 10-digit MSIN
+#    k: "..."
+#    opc: "..."
+
+# ------------------------------------------------------------------ radio (gNB)
+# sdr_type selects drivers, the RF device string and gain defaults: see roles/sdr/defaults/main.yml.
+#   limesdr_mini | limesdr_usb | usrp_b2xx | usrp_x3xx | zmq (no radio, software test)
+sdr_type: zmq
+sdr_serial: ""
+cell:
+  band: 40
+  dl_arfcn: 470000                              # 2350 MHz
+  bandwidth_mhz: 20
+  scs_khz: 30
+  pci: 1
+  srate: 23.04
+  tx_gain: null                                 # null = SDR profile default
+  rx_gain: null
+gnb_start_at_boot: false                        # licensed spectrum: only on air when someone says so
+
+# Band frequency ranges for comments/labels (FR1, DL).
+nr_band_ranges: {1: "2110-2170 MHz", 3: "1805-1880 MHz", 7: "2620-2690 MHz", 8: "925-960 MHz", 20: "791-821 MHz",
+                 28: "758-803 MHz", 38: "2570-2620 MHz", 40: "2300-2400 MHz", 41: "2496-2690 MHz", 77: "3300-4200 MHz",
+                 78: "3300-3800 MHz", 79: "4400-5000 MHz"}
+
+# derived names
+cell_label: "n{{ cell.band }}"
+cell_freq_mhz: >-
+  {{ (cell.dl_arfcn * 0.005) if cell.dl_arfcn < 600000 else (3000 + 0.015 * (cell.dl_arfcn - 600000)) }}
+cell_freq_label: "{{ '%g' % (cell_freq_mhz | float) }}"   # e.g. 2350
+gnb_unit: "gnb-{{ cell_label }}"
+gnb_config: "{{ obcell_home }}/gnb_{{ cell_label }}.yml"
+control_unit: "{{ cell_label }}-control"
+control_user: "{{ cell_label }}ctl"
+
+ocudu_repo: https://gitlab.com/ocudu/ocudu.git
+ocudu_version: 077b0808abf14046c39bc7c7e89039294ce8f6b5
+ocudu_dir: "{{ obcell_home }}/ocudu"
+# One compile job per usable CPU, but at most one per 2 GiB of RAM (OCUDU objects are big).
+ocudu_build_jobs: "{{ [[obcell_cpus | length, ansible_memtotal_mb | int // 2048] | min, 1] | max }}"
+ocudu_cmake_args: "-DCMAKE_BUILD_TYPE=Release"
+
+# srsUE over ZeroMQ (software UE test bench, no RF)
+srsue_enabled: false
+srsran4g_repo: https://github.com/srsran/srsRAN_4G.git
+srsran4g_version: release_23_11
+
+# ------------------------------------------------------------------ hardware extras
+rtlsdr_enabled: true                            # OpenWebRX+ with an RTL-SDR dongle
+usb2_roothub_no_autosuspend: false              # quirk for xHCI controllers whose USB2 root hub loops in suspend
+
+# ------------------------------------------------------------------ web stacks
+openlive_enabled: true
+intercom_enabled: true
+monitoring_enabled: true
+
+# Authelia operator logins. Password hashes are generated into secrets/<host>/ on first run.
+authelia_users:
+  - name: operator
+    displayname: Operator
+
+obcell_backup_keep: 10
+# `kit` was the command's name before the rename; keep it working as an alias.
+obcell_legacy_kit_command: true

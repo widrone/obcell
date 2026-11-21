@@ -1,0 +1,91 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  .flow {
+    position: absolute; left: 96px; right: 96px; top: 284px;
+    display: grid; grid-template-columns: 330px 1fr 560px 1fr 360px; grid-template-rows: repeat(4, 108px);
+    row-gap: 18px; align-items: center;
+  }
+  .flow .node { padding: 16px 20px; }
+  .flow .node .t { font-size: 22px; }
+  .flow .node .d { font-size: 16px; margin-top: 4px; }
+  .conn { padding: 0 16px; }
+  .mixer { grid-column: 3; grid-row: 1 / span 4; align-self: stretch; padding: 26px 30px !important; display: flex; flex-direction: column; }
+  .mixer .t { font-size: 30px !important; }
+  .pgm {
+    margin-top: 18px; position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; overflow: hidden;
+    background:
+      radial-gradient(120% 90% at 70% 30%, #3a4a5a 0%, #1d2731 55%, #10161c 100%);
+  }
+  .pgm img { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .pgm .rec {
+    position: absolute; top: 10px; left: 12px; font-family: var(--mono); font-size: 13px; color: #fff;
+    background: var(--accent); padding: 2px 8px; border-radius: 4px; letter-spacing: 1px;
+  }
+  .pgm .fmt { position: absolute; top: 10px; right: 12px; font-family: var(--mono); font-size: 13px; color: #cfd6de; }
+  .mixer .tags { margin-top: 12px; }
+  .outs { grid-column: 5; }
+  .band {
+    position: absolute; left: 96px; right: 96px; top: 806px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 28px;
+  }
+  .band .node { padding: 22px 26px; }
+  .band .node .t { font-size: 23px; }
+  .band .node .d { font-size: 18px; }
+  .footnote { position: absolute; left: 96px; right: 96px; top: 956px; }
+</style></head>
+<body><div class="slide">
+  <div class="kicker">03 / 05 · Remote production</div>
+  <h1>A TV gallery on the same box</h1>
+  <div class="sub">Two browser guests and two pulled feeds into a software vision mixer, plus talkback. No apps to install.</div>
+
+  <div class="flow">
+    <!-- inputs -->
+    <div class="node accent" style="grid-column:1;grid-row:1"><div class="t">Guest 1</div><div class="d">Any browser with a camera</div></div>
+    <div class="conn" style="grid-column:2;grid-row:1"><div class="arrow accent"><span class="lbl">WebRTC · WHIP</span></div></div>
+    <div class="node accent" style="grid-column:1;grid-row:2"><div class="t">Guest 2</div><div class="d">Invite link, no login</div></div>
+    <div class="conn" style="grid-column:2;grid-row:2"><div class="arrow accent"><span class="lbl">WebRTC · WHIP</span></div></div>
+    <div class="node" style="grid-column:1;grid-row:3"><div class="t">Feed 1</div><div class="d">Pulled from an RTMPS URL</div></div>
+    <div class="conn" style="grid-column:2;grid-row:3"><div class="arrow"><span class="lbl">ffmpeg remux → SRT</span><span class="lbl below">:9001 · encrypted</span></div></div>
+    <div class="node" style="grid-column:1;grid-row:4"><div class="t">Feed 2</div><div class="d">Pulled from an RTMPS URL</div></div>
+    <div class="conn" style="grid-column:2;grid-row:4"><div class="arrow"><span class="lbl">ffmpeg remux → SRT</span><span class="lbl below">:9002 · encrypted</span></div></div>
+
+    <!-- mixer -->
+    <div class="node dark mixer">
+      <div class="t">Open Live + Strom</div>
+      <div class="d">GStreamer vision mixer · compositing on the Intel iGPU</div>
+      <div class="pgm">
+        <img src="lower-third.png" alt="">
+        <span class="rec">PGM</span><span class="fmt">1280×720 · 25p</span>
+      </div>
+      <div class="tags">
+        <span class="tag">program 720p25</span><span class="tag">multiview 720p15</span><span class="tag">DSK graphics</span>
+      </div>
+    </div>
+
+    <!-- outputs -->
+    <div class="conn" style="grid-column:4;grid-row:1"><div class="arrow"><span class="lbl">WHEP · 5 Mb/s</span></div></div>
+    <div class="node outs" style="grid-row:1"><div class="t">Program out</div><div class="d">To the distribution chain</div></div>
+    <div class="conn" style="grid-column:4;grid-row:2"><div class="arrow"><span class="lbl">WHEP</span></div></div>
+    <div class="node outs" style="grid-row:2"><div class="t">Multiview</div><div class="d">In the Studio web app</div></div>
+    <div class="conn" style="grid-column:4;grid-row:3"><div class="arrow accent"><span class="lbl">program-minus</span></div></div>
+    <div class="node outs accent" style="grid-row:3"><div class="t">Return feeds</div><div class="d">Each guest sees the show, minus themselves</div></div>
+    <div class="conn" style="grid-column:4;grid-row:4"><div class="arrow"><span class="lbl">HTML → Chromium</span></div></div>
+    <div class="node outs" style="grid-row:4"><div class="t">Lower thirds</div><div class="d">Keyed live on a downstream keyer</div></div>
+  </div>
+
+  <div class="band">
+    <div class="node teal">
+      <div class="t">Open Intercom</div>
+      <div class="d">Symphony Media Bridge SFU · lines for crew and producer · guests join from a shared link, no login · a <b style="color:var(--teal)">Radio line</b> carries whatever OpenWebRX is tuned to, always on</div>
+    </div>
+    <div class="node">
+      <div class="t">One front door</div>
+      <div class="d">HTTPS everywhere (browsers insist, for cameras and mics) · Authelia single sign-on · guest routes allow-listed · Tailscale for remote crew</div>
+    </div>
+  </div>
+
+  <div class="footnote note">Field note: the "frozen guest" bug was an <b>empty USB hub</b> waking itself up about <i>200,000 times a second</i>. It has since been told to stay awake.</div>
+
+  <div class="footer"><span><b>Obcell</b> · private 4G/5G cell + remote production</span><span>November 2026</span></div>
+</div></body></html>

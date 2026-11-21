@@ -1,0 +1,6 @@
+- name: Reload caddy
+  ansible.builtin.shell: |
+    docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile && \
+    docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+  args:
+    chdir: "{{ obcell_home }}/openlive"

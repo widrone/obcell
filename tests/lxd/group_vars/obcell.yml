@@ -1,0 +1,27 @@
+obcell_user: ubuntu
+obcell_timezone: Etc/UTC
+sdr_type: zmq
+cell:
+  band: 40
+  dl_arfcn: 470000
+  bandwidth_mhz: 20
+  scs_khz: 30
+  pci: 1
+  srate: 23.04
+  tx_gain: null
+  rx_gain: null
+tailscale_enabled: false
+srsue_enabled: false
+rtlsdr_enabled: false
+# A throw-away test SIM (3GPP TS 35.208 test set 1 keys)
+open5gs_subscribers:
+  - imsi: "999700000000099"
+    k: "465B5CE8B199B49FAA5F0A2EE238A6BC"
+    opc: "CD63CB71954A9F4E48A5994E37A02BAF"
+# Docker 29's containerd overlayfs snapshotter can't mount inside an unprivileged
+# LXD container on a dir pool; fuse-overlayfs works there.
+docker_extra_packages: [fuse-overlayfs]
+docker_daemon_config:
+  storage-driver: fuse-overlayfs
+  features:
+    containerd-snapshotter: false

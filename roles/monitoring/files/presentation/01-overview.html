@@ -1,0 +1,184 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+  /* Left third: the plain-language story, on a dark panel. */
+  .story {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 640px; background: var(--ink); color: #fff;
+    padding: 80px 64px 0 96px; overflow: hidden;
+  }
+  .story .waves { position: absolute; right: -205px; top: -215px; opacity: .5; }
+  .story h1 { font-size: 50px; letter-spacing: -1.3px; line-height: 1.06; margin-top: 18px; position: relative; }
+  .story h1 em { font-style: normal; color: var(--accent); }
+  .story p { font-size: 19.5px; line-height: 1.45; color: #c4cbd4; margin-top: 20px; }
+  .story p b { color: #fff; font-weight: 600; display: block; font-size: 14px; font-family: var(--mono);
+               letter-spacing: 2.5px; text-transform: uppercase; color: #8a939e; margin-bottom: 4px; }
+  .story .big { position: absolute; left: 96px; right: 64px; bottom: 44px; display: flex; gap: 34px;
+                border-top: 1px solid #2c333c; padding-top: 16px; }
+  .story .big div { font-size: 16px; color: #8a939e; line-height: 1.25; }
+  .story .big span { display: block; font-size: 40px; font-weight: 800; color: #fff; letter-spacing: -1px; }
+  .story .big .z span { color: var(--accent); }
+
+  /* Right two thirds: the datasheet. */
+  .sheet { position: absolute; left: 704px; right: 96px; top: 80px; }
+  .sheet-head { display: flex; justify-content: space-between; align-items: baseline;
+                border-bottom: 2px solid var(--ink); padding-bottom: 10px; }
+  .sheet-head .h { font-size: 30px; font-weight: 800; letter-spacing: -.6px; }
+  .sheet-head .h small { font-size: 17px; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-left: 10px; }
+  .sheet-head .s { font-family: var(--mono); font-size: 13px; color: var(--faint); }
+  .cols3 { display: grid; grid-template-columns: 1fr 1fr 1.06fr; gap: 0 30px; margin-top: 16px; }
+  .sec { margin-bottom: 17px; }
+  .sec h3 { font-family: var(--mono); font-size: 12.5px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase;
+            color: var(--accent); border-bottom: 1px solid var(--line); padding-bottom: 4px; margin-bottom: 4px;
+            display: flex; justify-content: space-between; }
+  .sec h3 i { font-style: normal; color: var(--faint); font-weight: 500; letter-spacing: 1px; }
+  .sec.t h3 { color: var(--teal); }
+  .r { display: grid; grid-template-columns: 76px 1fr; gap: 8px; font-size: 14.4px; line-height: 1.37; padding: 3px 0;
+       border-bottom: 1px dotted #e6e2da; }
+  .r:last-child { border-bottom: 0; }
+  .r .k { font-family: var(--mono); font-size: 11px; letter-spacing: .6px; text-transform: uppercase; color: var(--faint); padding-top: 2px; }
+  .r .v { color: var(--ink); }
+  .r .v code, .ports code { font-family: var(--mono); font-size: 12.5px; color: var(--teal); }
+  .r .v .m { color: var(--muted); }
+  .r .v .hot { color: var(--accent); font-weight: 600; }
+  .ports { display: grid; grid-template-columns: 54px 1fr 54px 1fr; gap: 2px 8px; font-size: 14.2px; padding: 3px 0 2px; }
+  .ports code { font-weight: 600; }
+  .open { position: absolute; left: 704px; right: 96px; top: 934px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .open .lab { font-family: var(--mono); font-size: 12.5px; letter-spacing: 2px; text-transform: uppercase; color: var(--ink); font-weight: 600; margin-right: 4px; }
+  .open .tag { margin: 0; font-size: 12.5px; }
+  .footer { left: 704px; }
+</style></head>
+<body>
+<div class="story">
+  <svg class="waves" width="460" height="460" viewBox="0 0 460 460" aria-hidden="true">
+    <g fill="none" stroke="#e2531b">
+      <circle cx="230" cy="230" r="40" stroke-width="2" opacity=".9"/>
+      <circle cx="230" cy="230" r="85" stroke-width="1.6" opacity=".6"/>
+      <circle cx="230" cy="230" r="130" stroke-width="1.3" opacity=".4"/>
+      <circle cx="230" cy="230" r="175" stroke-width="1" opacity=".25"/>
+      <circle cx="230" cy="230" r="220" stroke-width="1" opacity=".12"/>
+    </g>
+    <circle cx="230" cy="230" r="7" fill="#e2531b"/>
+  </svg>
+  <div class="kicker">01 / 05 · Executive overview</div>
+  <h1>A TV studio with its <em>own mobile network</em>, in one small box</h1>
+
+  <p><b>What it is</b>One small computer running a private 5G network and a complete live-production gallery: vision mixer, crew intercom and the tools to watch over it.</p>
+  <p><b>Why</b>To broadcast from places with poor coverage, without an outside-broadcast truck or a phone company. Cameras and phones connect over our own radio.</p>
+  <p><b>How it is used</b>One web address, one login. Mixer, intercom, monitoring and the on-air switch are browser tabs, reachable from anywhere. Guests only need a link.</p>
+  <p><b>Where it stands</b>Working on the bench, built entirely from open source. Going on air waits for SIM cards and a test permit.</p>
+
+  <div class="big">
+    <div><span>1</span>box</div>
+    <div><span>1</span>login</div>
+    <div class="z"><span>0</span>apps to install</div>
+  </div>
+</div>
+
+<div class="sheet">
+  <div class="sheet-head">
+    <div class="h">The datasheet<small>for those who want to dig in</small></div>
+    <div class="s">measured on the box · 19 Nov 2026</div>
+  </div>
+
+  <div class="cols3">
+    <!-- column 1 -->
+    <div>
+      <div class="sec">
+        <h3>Hardware <i>one PC</i></h3>
+        <div class="r"><span class="k">Host</span><span class="v">Intel NUC · Core i5-6260U @ 1.8 GHz</span></div>
+        <div class="r"><span class="k">CPU</span><span class="v">2 cores / 4 threads <span class="m">· CPUs 0+2, 1+3 are HT pairs</span></span></div>
+        <div class="r"><span class="k">Memory</span><span class="v">15 GiB RAM · 98 GB SSD <span class="m">(38 % used)</span></span></div>
+        <div class="r"><span class="k">GPU</span><span class="v">Intel Iris 540 <span class="m">· mixer compositing</span></span></div>
+        <div class="r"><span class="k">Radio</span><span class="v">LimeSDR Mini <span class="m">· USB 3 · 23.04 MS/s</span></span></div>
+        <div class="r"><span class="k">Receiver</span><span class="v">RTL2832U + R820T <span class="m">· 24 MHz–1.7 GHz</span></span></div>
+        <div class="r"><span class="k">Quirk</span><span class="v">USB port 4 retired <span class="m">(over-current)</span></span></div>
+      </div>
+      <div class="sec">
+        <h3>Radio access <i>5G NR</i></h3>
+        <div class="r"><span class="k">gNB</span><span class="v">OCUDU <span class="m">· srsRAN Project lineage</span></span></div>
+        <div class="r"><span class="k">Band</span><span class="v">n40 · 2350.000 MHz <span class="m">· ARFCN 470000</span></span></div>
+        <div class="r"><span class="k">Carrier</span><span class="v">20 MHz TDD · 30 kHz SCS · PCI 1</span></div>
+        <div class="r"><span class="k">Network</span><span class="v">PLMN 999-70 <span class="m">(test range)</span> · 5G SA</span></div>
+        <div class="r"><span class="k">On air</span><span class="v hot">Manual only · ON AIR button in the portal</span></div>
+        <div class="r"><span class="k">Metrics</span><span class="v">JSON over WebSocket → Telegraf → InfluxDB 3</span></div>
+      </div>
+      <div class="sec">
+        <h3>Mobile core <i>Open5GS 2.8.0</i></h3>
+        <div class="r"><span class="k">5G SA</span><span class="v">AMF · SMF · UPF · PCF · NRF · SCP · AUSF · UDM · UDR · NSSF · BSF · SEPP</span></div>
+        <div class="r"><span class="k">4G EPC</span><span class="v">MME · HSS · PCRF · SGW-C · SGW-U</span></div>
+        <div class="r"><span class="k">Units</span><span class="v">18 systemd services <span class="m">· metrics from every NF</span></span></div>
+        <div class="r"><span class="k">Phones</span><span class="v">10.45.0.0/16 <span class="m">via ogstun, NAT to LAN</span></span></div>
+        <div class="r"><span class="k">SIMs</span><span class="v">Subscribers in MongoDB · WebUI <code>:9999</code></span></div>
+      </div>
+    </div>
+
+    <!-- column 2 -->
+    <div>
+      <div class="sec">
+        <h3>Production <i>Open Live + Strom</i></h3>
+        <div class="r"><span class="k">Guests</span><span class="v">2 × browser camera · WebRTC/WHIP · invite link</span></div>
+        <div class="r"><span class="k">Feeds</span><span class="v">2 × RTMPS pull → ffmpeg → SRT <code>:9001</code> <code>:9002</code></span></div>
+        <div class="r"><span class="k">Mixer</span><span class="v">GStreamer pipelines <span class="m">· iGPU compositing</span></span></div>
+        <div class="r"><span class="k">Program</span><span class="v">1280×720p25 · WHEP · 5 Mb/s</span></div>
+        <div class="r"><span class="k">Monitor</span><span class="v">Multiview 720p15 in the Studio</span></div>
+        <div class="r"><span class="k">Returns</span><span class="v">Program-minus feed per guest</span></div>
+        <div class="r"><span class="k">Graphics</span><span class="v">HTML lower thirds → downstream keyer</span></div>
+        <div class="r"><span class="k">Cost</span><span class="v">Idle ≈ 1 % CPU · 200 MB <span class="m">· runs by default</span></span></div>
+      </div>
+      <div class="sec t">
+        <h3>Intercom <i>Open Intercom</i></h3>
+        <div class="r"><span class="k">SFU</span><span class="v">Symphony Media Bridge · UDP <code>10000</code></span></div>
+        <div class="r"><span class="k">Lines</span><span class="v">Production "Crew": Talkback · Radio</span></div>
+        <div class="r"><span class="k">Guests</span><span class="v">Share link, no login <span class="m">· API allow-listed at the front door</span></span></div>
+        <div class="r"><span class="k">Radio</span><span class="v">OpenWebRX audio → WHIP bridge → every line named "Radio" · follows the active profile, renames itself <span class="m">("Radio 446.006 NFM")</span></span></div>
+        <div class="r"><span class="k">Cost</span><span class="v">Radio feed ≈ 0.6 core, always on <span class="m">· <code>obcell radio off</code></span></span></div>
+      </div>
+      <div class="sec t">
+        <h3>Spectrum <i>OpenWebRX+</i></h3>
+        <div class="r"><span class="k">Profiles</span><span class="v">FM 100 · airband AM · PMR446 · 433 ISM · LTE 800 · PMSE 823 · mics 863 · ADS-B 1090</span></div>
+        <div class="r"><span class="k">Blind</span><span class="v">Cannot see n40 <span class="m">· needs a HackRF-class receiver</span></span></div>
+      </div>
+    </div>
+
+    <!-- column 3 -->
+    <div>
+      <div class="sec t">
+        <h3>Access <i>one front door</i></h3>
+        <div class="r"><span class="k">Proxy</span><span class="v">Caddy · HTTPS on every service</span></div>
+        <div class="r"><span class="k">Certs</span><span class="v">Let's Encrypt via Tailscale · internal CA on the LAN</span></div>
+        <div class="r"><span class="k">Login</span><span class="v">Authelia single sign-on · 3 cookie domains</span></div>
+        <div class="r"><span class="k">Remote</span><span class="v">Tailscale · subnet route to the LAN address for intercom audio</span></div>
+        <div class="r"><span class="k">Internet</span><span class="v hot">No open ports</span></div>
+        <div class="ports">
+          <code>/</code><span>Homepage portal</span><code>:7443</code><span>Open Live</span>
+          <code>:8443</code><span>Intercom</span><code>:3443</code><span>Grafana</span>
+          <code>:4443</code><span>ntopng</span><code>:6443</code><span>OpenWebRX+</span>
+        </div>
+        <div class="r"><span class="k">Names</span><span class="v">Same ports on <code>&lt;name&gt;.local</code> and the tailnet name</span></div>
+      </div>
+      <div class="sec t">
+        <h3>Observability</h3>
+        <div class="r"><span class="k">Metrics</span><span class="v">Prometheus · 13 targets · 13 probes · 13 alert rules · 30 days</span></div>
+        <div class="r"><span class="k">Views</span><span class="v">Grafana: core, radio CQI/MCS/BLER, traffic, CPU per core</span></div>
+        <div class="r"><span class="k">Traffic</span><span class="v">ntopng + nDPI on phone and LAN flows</span></div>
+        <div class="r"><span class="k">Portal</span><span class="v">Homepage · Obcell health · on-air control</span></div>
+      </div>
+      <div class="sec">
+        <h3>Operations</h3>
+        <div class="r"><span class="k">CPU</span><span class="v">gNB pinned to CPUs 0–1 · 23 containers on 2–3</span></div>
+        <div class="r"><span class="k">CLI</span><span class="v"><code>obcell status · onair · radio · reload · backup · slides</code></span></div>
+        <div class="r"><span class="k">Safety</span><span class="v">Config reloads are validated first · logs capped at 10 MB</span></div>
+        <div class="r"><span class="k">Backup</span><span class="v">Configs + SIM keys + productions + CA · last 10 kept</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="open">
+  <span class="lab">Open items</span>
+  <span class="tag a">SIM cards on order</span><span class="tag a">n40 test permit</span><span class="tag">RTMPS URLs</span>
+  <span class="tag">root CA on devices</span><span class="tag">remote audio test</span><span class="tag">phone alerts</span>
+</div>
+
+<div class="footer"><span><b>Obcell</b> · private 4G/5G cell + remote production</span><span>November 2026</span></div>
+</body></html>

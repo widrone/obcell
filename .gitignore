@@ -1,0 +1,12 @@
+secrets/*
+!secrets/README.md
+*.retry
+.ansible/
+__pycache__/
+tests/.work/
+activate
+# Your boxes: install.sh writes these; keep them out of git
+inventory/*.yml
+!inventory/hosts.yml
+inventory/host_vars/*
+!inventory/host_vars/example/
