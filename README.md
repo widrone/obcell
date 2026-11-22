@@ -37,8 +37,11 @@ without changing anything.
 | Release | Status |
 |---|---|
 | 22.04 LTS (jammy) | **Tested.** The reference Obcell runs it; a full fresh install passes in a test container |
-| 24.04 LTS (noble) | **Prepared, not yet tested.** Every package is available ([details](docs/ubuntu-releases.md)) |
-| 26.04 LTS (resolute) | **Prepared, not yet tested.** MongoDB is installed from its 24.04 repo ([details](docs/ubuntu-releases.md)) |
+| 24.04 LTS (noble) | **Tested in containers.** Fresh install, re-run, health check, virtual cell and phone all pass ([details](docs/ubuntu-releases.md)) |
+| 26.04 LTS (resolute) | **Tested in containers.** As 24.04; MongoDB is installed from its 24.04 repo ([details](docs/ubuntu-releases.md)) |
+
+"In containers" means with the virtual ZeroMQ radio: no real Obcell runs 24.04 or 26.04 yet, so
+their SDR drivers haven't been tried with hardware.
 
 ## Install an Obcell box
 

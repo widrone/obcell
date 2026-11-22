@@ -39,8 +39,8 @@ main() {
   fi
   case ${VERSION_ID:-} in
     22.04) ;;
-    24.04|26.04) say "Ubuntu $VERSION_ID: prepared but not yet tested; 22.04 is the tested release" ;;
-    *) die "Ubuntu ${VERSION_ID:-?} is not supported (22.04 tested; 24.04 and 26.04 prepared)" ;;
+    24.04|26.04) say "Ubuntu $VERSION_ID: tested in containers with the virtual radio; the reference Obcell runs 22.04" ;;
+    *) die "Ubuntu ${VERSION_ID:-?} is not supported (22.04, 24.04 or 26.04)" ;;
   esac
   [[ $name =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "Obcell name '$name' must be lower-case letters, digits and '-' (set OBCELL_NAME)"
 
