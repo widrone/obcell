@@ -19,10 +19,14 @@
     path: "{{ obcell_home }}/srsRAN_4G/build/srsue/src/srsue"
   register: srsue_bin
 
+# -Wno-error=array-bounds: GCC 13 (24.04) also flags asn1::dyn_array::resize() (rrc.cc), a
+# false alarm (it can't see that size never exceeds capacity). It stays a warning; every
+# other -Werror stays fatal. The real array-bounds bug is fixed by the patch above.
 - name: Build srsUE
   ansible.builtin.shell: |
     set -e
-    cmake -S {{ obcell_home }}/srsRAN_4G -B {{ obcell_home }}/srsRAN_4G/build -DCMAKE_BUILD_TYPE=Release
+    cmake -S {{ obcell_home }}/srsRAN_4G -B {{ obcell_home }}/srsRAN_4G/build -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CXX_FLAGS=-Wno-error=array-bounds
     cmake --build {{ obcell_home }}/srsRAN_4G/build -j {{ ocudu_build_jobs }} --target srsue
   become: true
   become_user: "{{ obcell_user }}"
