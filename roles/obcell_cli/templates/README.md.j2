@@ -22,10 +22,17 @@ One Authelia login covers everything except Intercom guests.
 | ntopng | `:4443` | `:4443` |
 | OpenWebRX+ (RTL-SDR) | `:6443` | `:6443` |
 | Open5GS WebUI (subscribers; then its own admin password) | `:{{ open5gs_webui_https_port }}` | `:{{ open5gs_webui_https_port }}` |
+{% if owntracks_enabled %}
+| OwnTracks map (phones post to `/pub` with an app login) | `:{{ owntracks_https_port }}` | `:{{ owntracks_https_port }}` |
+{% endif %}
 
 - **Tailnet:** uses real Let's Encrypt certificates, fetched by Caddy from tailscaled.
 - **LAN:** uses Caddy's internal CA. Devices need `~/openlive/openlive-root-ca.crt` installed.
 - **Old LAN address:** `https://{{ obcell_mdns_name }}` used to be Open Live. Bookmarks now land on Homepage; Open Live is on `:7443`. `https://{{ obcell_lan_ip }}` redirects to the LAN portal.
+{% if owntracks_enabled %}
+- **OwnTracks phones:** the app (Mode HTTP) posts to `/pub` with its own username and password from `~/owntracks/CREDENTIALS.txt`; the operator login doesn't work there.{% if owntracks_funnel %} On the internet: **https://{{ obcell_tailnet_name }}:{{ owntracks_funnel_port }}/pub** (Tailscale Funnel, only `/pub`). Phones on the cell or the LAN reach that address through this box's internet uplink.{% endif %}
+
+{% endif %}
 - **Intercom audio:** goes to UDP {{ obcell_lan_ip }}:10000. Tailnet devices reach it through the approved subnet route {{ obcell_lan_ip }}/32.
 
 ## Where things live
@@ -36,6 +43,9 @@ One Authelia login covers everything except Intercom guests.
 | Open Live stack | `~/openlive/compose.yml` (+ `.env`, `rtmps-relay/feeds.conf`) |
 | Intercom stack | `~/intercom/compose.yml` (+ `.env`) |
 | Monitoring stack | `~/monitoring/compose.yml` |
+{% if owntracks_enabled %}
+| OwnTracks Recorder | `~/owntracks/compose.yml`, location history in `~/owntracks/store/` (root-owned), app logins in `CREDENTIALS.txt` |
+{% endif %}
 | Prometheus scrape config and alert rules | `~/monitoring/prometheus/prometheus.yml`, `rules/obcell.yml` |
 | Service probes | `~/monitoring/blackbox/blackbox.yml` |
 | Homepage tiles | `~/monitoring/homepage/*.yaml` (static files in `homepage/images/`) |
@@ -129,6 +139,9 @@ The patches:
   - the Open5GS subscribers (mongodump);
   - Open Live productions (CouchDB export);
   - Caddy's root CA;
+{% if owntracks_enabled %}
+  - the OwnTracks location history (`owntracks-store.tar`);
+{% endif %}
   - the source patches.
 - **Retention:** the newest 10 are kept in `~/obcell-backups/`.
 - **Secrets:** the file contains SIM keys and passwords. Copy it off the box, but never anywhere public.

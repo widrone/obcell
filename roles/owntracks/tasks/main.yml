@@ -1,0 +1,100 @@
+- name: OwnTracks needs the front door
+  ansible.builtin.assert:
+    that: openlive_enabled | bool
+    fail_msg: "owntracks_enabled needs openlive_enabled: Caddy, in the Open Live stack, is its only way in"
+    quiet: true
+
+- name: OwnTracks directory
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/owntracks"
+    state: directory
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0775"
+
+# The Recorder runs as root in its container. The history says where people were: root only.
+- name: Location history (Recorder store)
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/owntracks/store"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Stack file
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ obcell_home }}/owntracks/compose.yml"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0664"
+
+- name: App logins (CREDENTIALS.txt; diff hidden)
+  ansible.builtin.template:
+    src: CREDENTIALS.txt.j2
+    dest: "{{ obcell_home }}/owntracks/CREDENTIALS.txt"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0600"
+  diff: false
+
+- name: Stack up (OwnTracks Recorder)
+  community.docker.docker_compose_v2:
+    project_src: "{{ obcell_home }}/owntracks"
+    state: present
+    remove_orphans: false
+
+# ---------------------------------------------------------------- Tailscale Funnel (public /pub)
+- name: Funnel needs the tailnet
+  ansible.builtin.assert:
+    that:
+      - tailscale_enabled | bool
+      - obcell_tailnet_name | length > 0
+    fail_msg: "owntracks_funnel needs tailscale_enabled and obcell_tailnet_name"
+    quiet: true
+  when: owntracks_funnel | bool
+
+- name: Funnel / serve state
+  ansible.builtin.command: tailscale serve status --json
+  register: _ts_serve
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: tailscale_enabled | bool
+
+- name: What Funnel does for OwnTracks now
+  vars:
+    _serve: "{{ (_ts_serve.stdout | default('', true) | trim or '{}') | from_json }}"
+    _host: "{{ obcell_tailnet_name }}:{{ owntracks_funnel_port }}"
+    _proxy: "{{ _serve.get('Web', {}).get(_host, {}).get('Handlers', {}).get('/', {}).get('Proxy', '') }}"
+  ansible.builtin.set_fact:
+    _otr_funnel_on: "{{ _serve.get('AllowFunnel', {}).get(_host, false) | bool }}"
+    _otr_funnel_right: "{{ _serve.get('AllowFunnel', {}).get(_host, false) | bool and _proxy == 'http://127.0.0.1:' ~ owntracks_funnel_local_port }}"
+
+- name: Is Funnel allowed for this node?
+  ansible.builtin.command: tailscale status --json
+  register: _ts_status
+  changed_when: false
+  check_mode: false
+  when: owntracks_funnel | bool and not _otr_funnel_right
+
+- name: Funnel allowed by the tailnet policy
+  ansible.builtin.assert:
+    that: "'funnel' in ((_ts_status.stdout | from_json).Self.CapMap | default({}, true))"
+    fail_msg: >-
+      Tailscale Funnel is not allowed for {{ obcell_tailnet_name }}. In the Tailscale admin console,
+      Access controls: add a nodeAttrs entry with "attr": ["funnel"] for this node (and keep HTTPS
+      certificates on), then run the playbook again (--tags owntracks is enough).
+    quiet: true
+  when: owntracks_funnel | bool and not _otr_funnel_right
+
+- name: Public /pub via Tailscale Funnel
+  ansible.builtin.command: >-
+    timeout 60 tailscale funnel --bg --yes --https={{ owntracks_funnel_port }} http://127.0.0.1:{{ owntracks_funnel_local_port }}
+  changed_when: true
+  when: owntracks_funnel | bool and not _otr_funnel_right
+
+- name: Funnel off (owntracks_funnel is false)
+  ansible.builtin.command: tailscale funnel --https={{ owntracks_funnel_port }} off
+  changed_when: true
+  when: not owntracks_funnel | bool and _otr_funnel_on | default(false)

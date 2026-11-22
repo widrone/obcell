@@ -99,6 +99,13 @@
   changed_when: true
 
 # ---------------------------------------------------------------- Tailscale (opt-in)
+- name: Stop serving OwnTracks through Tailscale Funnel (if it was on)
+  ansible.builtin.command: tailscale funnel --https={{ owntracks_funnel_port }} off
+  when: "'tailscale' in _installed"
+  register: _funnel_off
+  failed_when: false
+  changed_when: _funnel_off.rc == 0
+
 - name: Leave the tailnet
   ansible.builtin.command: tailscale logout
   when: reset_remove_tailscale | bool and 'tailscale' in _installed

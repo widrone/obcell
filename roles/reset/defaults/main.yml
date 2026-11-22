@@ -12,13 +12,14 @@ reset_sdr_packages: "{{ sdr_profiles.values() | map(attribute='packages') | flat
 reset_build_deps: [libfftw3-dev, libmbedtls-dev, libsctp-dev, libyaml-cpp-dev, libgtest-dev, libzmq3-dev,
                    libboost-program-options-dev, libconfig++-dev]
 reset_docker_packages: "{{ ['docker.io', 'docker-compose-v2', 'docker-buildx'] + (docker_extra_packages | default([])) }}"
-reset_stacks: [openlive, intercom, monitoring]
+reset_stacks: [openlive, intercom, monitoring, owntracks]
 reset_home_paths:
   - ocudu
   - srsRAN_4G
   - openlive
   - intercom
   - monitoring
+  - owntracks
   - obcell
   - presentation
   - kit                          # before the rename

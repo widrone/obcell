@@ -74,6 +74,13 @@
         description: Crew intercom · guests can join without login
         href: https://{{ obcell_link_host }}:8443
         siteMonitor: http://127.0.0.1:8082
+{% if owntracks_enabled %}
+    - OwnTracks:
+        icon: mdi-map-marker-radius
+        description: Where the crew's phones are (OwnTracks app) · live map, tracks and table
+        href: https://{{ obcell_link_host }}:{{ owntracks_https_port }}/
+        siteMonitor: http://127.0.0.1:{{ owntracks_recorder_port }}/
+{% endif %}
     - OpenWebRX+ spectrum:
         icon: mdi-sine-wave
         description: Web SDR waterfall for an RTL-SDR (RF/interference check)

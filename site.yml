@@ -41,6 +41,7 @@
     - {role: obcell_cli, tags: [cli]}
     - {role: openlive, tags: [openlive, web], when: openlive_enabled | bool}
     - {role: intercom, tags: [intercom, web], when: intercom_enabled | bool}
+    - {role: owntracks, tags: [owntracks, web], when: owntracks_enabled | bool}
     - {role: monitoring, tags: [monitoring, web], when: monitoring_enabled | bool}
     - {role: cell_control, tags: [control, web]}
   post_tasks:

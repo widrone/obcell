@@ -5,9 +5,10 @@
 // Only ports Caddy serves on that name are rewritten; the rest keep {{ obcell_link_host }}.
 (() => {
   const LINK_HOST = {{ obcell_link_host | to_json }};
+{% set _otr = [owntracks_https_port | int] if owntracks_enabled else [] %}
   const SERVED = {{ {
-    obcell_mdns_name: [443, 3443, 4443, 5443, 6443, 7443, 8443, open5gs_webui_https_port | int],
-    obcell_lan_ip: [3443, 4443, 5443, 6443, 8443, open5gs_webui_https_port | int],
+    obcell_mdns_name: [443, 3443, 4443, 5443, 6443, 7443, 8443, open5gs_webui_https_port | int] + _otr,
+    obcell_lan_ip: [3443, 4443, 5443, 6443, 8443, open5gs_webui_https_port | int] + _otr,
   } | to_json }};
   const here = location.hostname;
   if (here === LINK_HOST || !(here in SERVED)) return;

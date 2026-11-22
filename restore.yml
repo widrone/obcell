@@ -3,6 +3,7 @@
 #   - Open5GS subscribers (SIM keys)     -> mongorestore (existing IMSIs are kept, not overwritten)
 #   - Open Live productions/settings     -> CouchDB open-live (same revisions as in the backup)
 #   - Caddy's internal root CA           -> devices that trust the old CA keep working
+#   - OwnTracks location history         -> replaces ~/owntracks/store (positions recorded since the build are lost)
 #
 #   ansible-playbook restore.yml --limit <host> -e backup=~/obcell-backups/obcell-config-YYYYMMDD-HHMM.tar.gz
 - name: Restore Obcell data
@@ -26,16 +27,26 @@
         state: directory
         mode: "0700"
 
+    # Older backups have no OwnTracks part, and tar fails on a member that isn't there.
+    - name: Members of the archive
+      ansible.builtin.command: tar -tzf {{ backup | expanduser }}
+      delegate_to: localhost
+      become: false
+      register: members
+      changed_when: false
+      check_mode: false
+
     - name: Unpack the data members of the archive
       ansible.builtin.unarchive:
         src: "{{ backup }}"
         dest: "{{ work }}"
-        include: [./open5gs-mongo.archive.gz, ./open-live-couchdb.json, ./caddy-pki.tar]
+        include: "{{ ['./open5gs-mongo.archive.gz', './open-live-couchdb.json', './caddy-pki.tar']
+                     + (['./owntracks-store.tar'] if './owntracks-store.tar' in members.stdout_lines else []) }}"
 
     - name: Which parts are in this backup?
       ansible.builtin.stat:
         path: "{{ work }}/{{ item }}"
-      loop: [open5gs-mongo.archive.gz, open-live-couchdb.json, caddy-pki.tar]
+      loop: [open5gs-mongo.archive.gz, open-live-couchdb.json, caddy-pki.tar, owntracks-store.tar]
       register: parts
 
     - name: Open5GS subscribers
@@ -83,6 +94,22 @@
           loop:
             - "{{ obcell_home }}/openlive/openlive-root-ca.crt"
             - "{{ obcell_home }}/monitoring/blackbox/lan-root-ca.crt"
+
+    - name: OwnTracks location history
+      when: parts.results[3].stat.exists and owntracks_enabled | bool
+      block:
+        - name: Stop the Recorder
+          ansible.builtin.command: docker compose stop recorder
+          args:
+            chdir: "{{ obcell_home }}/owntracks"
+        - name: Put the old store back
+          ansible.builtin.shell: rm -rf store && tar -xf {{ work }}/owntracks-store.tar
+          args:
+            chdir: "{{ obcell_home }}/owntracks"
+        - name: Start the Recorder
+          ansible.builtin.command: docker compose start recorder
+          args:
+            chdir: "{{ obcell_home }}/owntracks"
 
     - name: Clean up
       ansible.builtin.file:

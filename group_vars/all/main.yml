@@ -115,6 +115,21 @@ usb2_roothub_no_autosuspend: false              # quirk for xHCI controllers who
 openlive_enabled: true
 intercom_enabled: true
 monitoring_enabled: true
+owntracks_enabled: true                         # needs openlive_enabled (Caddy is its front door)
+
+# OwnTracks Recorder (~/owntracks): phones running the OwnTracks app report their position over
+# HTTPS (the app's HTTP mode; no MQTT broker). The map is behind the operator login; phones log
+# in to /pub with their own username and password (generated into secrets/<host>/).
+owntracks_users:                                # one per person or phone; the app's "Username"
+  - name: crew
+owntracks_https_port: 2443                      # map + /pub on every name/IP (LAN, tailnet, the cell)
+# Tailscale Funnel: /pub (and nothing else) on the public internet at
+# https://<obcell_tailnet_name>:<owntracks_funnel_port>/pub, with a Let's Encrypt certificate.
+# Needs tailscale_enabled, obcell_tailnet_name, and Funnel allowed for this node in the tailnet policy.
+owntracks_funnel: false
+owntracks_funnel_port: 10000                    # Funnel only offers 443, 8443 and 10000; Caddy has the first two
+owntracks_funnel_local_port: 8084               # Caddy's plain-HTTP listener on 127.0.0.1 that Funnel forwards to
+owntracks_recorder_port: 8083                   # the Recorder itself, 127.0.0.1 only
 
 # Authelia operator logins. Password hashes are generated into secrets/<host>/ on first run.
 authelia_users:

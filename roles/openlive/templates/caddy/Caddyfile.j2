@@ -218,3 +218,54 @@ https://{{ obcell_lan_ip }}, http://{{ obcell_lan_ip }}, http://{{ obcell_mdns_n
 		reverse_proxy 127.0.0.1:{{ open5gs_webui_port }}
 	}
 }
+{% if owntracks_enabled %}
+
+# OwnTracks Recorder (~/owntracks). Phones post their position to /pub with their own app login;
+# Caddy then sets X-Limit-U, which the Recorder takes as the user, so a login can only write its
+# own track. Everything else (map, table, API) needs the operator login.
+(owntracks_pub) {
+	basic_auth {
+{% for u in owntracks_users %}
+		{{ u.name }} {{ lookup('ansible.builtin.file', obcell_secrets_dir ~ '/owntracks_' ~ u.name ~ '.hash') }}
+{% endfor %}
+	}
+	request_header X-Limit-U {http.auth.user.id}
+	reverse_proxy 127.0.0.1:{{ owntracks_recorder_port }}
+}
+
+{{ obcell_names_ip | obcell_urls(owntracks_https_port) | join(', ') }} {
+	tls internal
+	log {
+		output stdout
+		format json
+	}
+	import monitoring_login
+	handle /pub {
+		import owntracks_pub
+	}
+	handle {
+		forward_auth 127.0.0.1:9091 {
+			uri /authelia/api/authz/forward-auth
+			copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+		}
+		reverse_proxy 127.0.0.1:{{ owntracks_recorder_port }}
+	}
+}
+{% if owntracks_funnel %}
+
+# Tailscale Funnel's target, on 127.0.0.1 only: the public internet gets /pub and nothing else.
+http://:{{ owntracks_funnel_local_port }} {
+	bind 127.0.0.1
+	log {
+		output stdout
+		format json
+	}
+	handle /pub {
+		import owntracks_pub
+	}
+	handle {
+		respond 404
+	}
+}
+{% endif %}
+{% endif %}

@@ -5,8 +5,8 @@ set -uo pipefail
 
 PROM=http://127.0.0.1:9095
 TS_NAME=[= obcell_link_host =]
-declare -A STACK_DIR=([openlive]=$HOME/openlive [intercom]=$HOME/intercom [monitoring]=$HOME/monitoring)
-STACKS=(openlive intercom monitoring)
+declare -A STACK_DIR=([openlive]=$HOME/openlive [intercom]=$HOME/intercom [monitoring]=$HOME/monitoring [owntracks]=$HOME/owntracks)
+STACKS=(openlive intercom monitoring[% if owntracks_enabled %] owntracks[% endif %])
 BACKUP_DIR=$HOME/obcell-backups
 BACKUP_KEEP=[= obcell_backup_keep =]
 PLAYWRIGHT_IMAGE=mcr.microsoft.com/playwright/python:v1.48.0-jammy
@@ -38,8 +38,8 @@ compose() { local s=$1; shift; (cd "${STACK_DIR[$s]}" && sudo docker compose "$@
 stack_args() {  # "all" or a stack name -> list of stacks
   case "${1:-all}" in
     all) echo "${STACKS[@]}" ;;
-    openlive|intercom|monitoring) echo "$1" ;;
-    *) die "unknown stack '$1' (openlive, intercom, monitoring, all)" ;;
+    openlive|intercom|monitoring[% if owntracks_enabled %]|owntracks[% endif %]) echo "$1" ;;
+    *) die "unknown stack '$1' (openlive, intercom, monitoring[% if owntracks_enabled %], owntracks[% endif %], all)" ;;
   esac
 }
 
@@ -93,6 +93,14 @@ d=json.load(sys.stdin); n=len(d["lines"]); ok=sum(l["connection"]=="connected" f
 if not d["enabled"]: print("feed switched off"); sys.exit()
 print(d["participant"], "into", n, "Radio line(s)" + ("" if ok==n else " (%d not connected)" % (n-ok)), "" if d["openwebrx_connected"] else "· OpenWebRX NOT connected")' 2>/dev/null || echo 'bridge not running (obcell up intercom)')"
   lbl tailscale; printf '%s · https://%s\n' "$ts" "$TS_NAME"
+[% if owntracks_enabled %]
+  lbl owntracks; printf '%s\n' "$(curl -s -m 2 http://127.0.0.1:[= owntracks_recorder_port =]/api/0/last | python3 -c 'import json,sys,time
+try: d=[x for x in json.load(sys.stdin) if x.get("username") != "ping"]
+except Exception: print("recorder not answering (obcell up owntracks)"); sys.exit()
+if not d: print("no phone has reported yet"); sys.exit()
+age=int(time.time() - max(x.get("tst", 0) for x in d))
+print("%d phone(s) · newest report %s ago" % (len(d), "%d min" % (age // 60) if age < 86400 else "%d days" % (age // 86400)))' 2>/dev/null)[% if owntracks_funnel %] · public https://[= obcell_tailnet_name =]:[= owntracks_funnel_port =]/pub[% endif %]"
+[% endif %]
 
   lbl host; printf 'load %s · mem free %s · disk free %s · temp %s°C · up %s\n' \
     "$(cut -d' ' -f1-3 /proc/loadavg)" "$(free -h | awk '/^Mem/{print $7}')" "$(df -h / | awk 'NR==2{print $4}')" \
@@ -221,12 +229,18 @@ cmd_backup() {
   git -C "$HOME/openlive/open-live" diff > "$work/open-live-local.patch" 2>/dev/null
   # Caddy's internal root CA (devices trust it; losing it means re-installing the CA everywhere).
   sudo tar -C /var/lib/docker/volumes/openlive_caddy_data/_data/caddy -cf "$work/caddy-pki.tar" pki 2>/dev/null
+  local extra=()
+[% if owntracks_enabled %]
+  # OwnTracks: where the phones have been (the Recorder's store), and the app logins.
+  sudo tar -C "$HOME/owntracks" -cf "$work/owntracks-store.tar" store 2>/dev/null || echo "  ! OwnTracks store not found"
+  extra+=("${HOME#/}/owntracks/compose.yml" "${HOME#/}/owntracks/CREDENTIALS.txt")
+[% endif %]
   sudo tar -czf "$out" \
     --exclude='*/node_modules' --exclude='*/.git' \
     -C / \
     "${HOME#/}/openlive/compose.yml" "${HOME#/}/openlive/.env" "${HOME#/}/openlive/caddy" "${HOME#/}/openlive/authelia" \
     "${HOME#/}/openlive/rtmps-relay" "${HOME#/}/openlive/graphics" "${HOME#/}/openlive/CREDENTIALS.txt" "${HOME#/}/openlive/openlive-root-ca.crt" \
-    "${HOME#/}/intercom/compose.yml" "${HOME#/}/intercom/.env" \
+    "${HOME#/}/intercom/compose.yml" "${HOME#/}/intercom/.env" "${extra[@]}" \
     "${HOME#/}/monitoring" "${HOME#/}/presentation" "${HOME#/}/obcell" "${HOME#/}/[= gnb_config | basename =]" \
     etc/open5gs etc/systemd/system/[= gnb_unit =].service etc/systemd/system/[= gnb_unit =].service.d etc/systemd/system/[= control_unit =].service etc/sudoers.d/[= control_unit =] \
     etc/modprobe.d/blacklist-rtl-sdr.conf etc/udev/rules.d/99-usb2-roothub-no-autosuspend.rules opt/[= control_unit =] \
@@ -259,13 +273,13 @@ $(bold obcell) - operate the [= obcell_name =] Obcell (private 5G + remote produ
   obcell boot-onair [on|off]       whether the gNB starts (and transmits) after a reboot
   obcell radio [on|off]            OpenWebRX audio into Intercom lines named "Radio" (status without argument)
 
-  obcell up [stack] [svc...]       start a stack (openlive | intercom | monitoring | all, default all)
+  obcell up [stack] [svc...]       start a stack (openlive | intercom | monitoring[% if owntracks_enabled %] | owntracks[% endif %] | all, default all)
   obcell stop <stack> [svc...]     stop, keeping containers   ·  obcell restart <stack> [svc...]
   obcell ps [stack]                container status
   obcell logs <name> [-f]          gnb, open5gs-amfd, control, tailscale, or any container (caddy, open-live, sfu…)
 
   obcell reload <what>             validated reload: caddy | authelia | prometheus | blackbox | homepage | grafana | control
-  obcell backup                    configs + Open5GS subscribers + Open Live productions + CA → ~/obcell-backups
+  obcell backup                    configs + Open5GS subscribers + Open Live productions[% if owntracks_enabled %] + OwnTracks history[% endif %] + CA → ~/obcell-backups
   obcell slides                    re-render ~/presentation/*.html to PNG and publish on Homepage
 EOF
 }

@@ -20,7 +20,7 @@
     - name: Containers running
       ansible.builtin.shell: |
         set -e
-        for p in {{ ((['openlive'] if openlive_enabled else []) + (['intercom'] if intercom_enabled else []) + (['monitoring'] if monitoring_enabled else [])) | join(' ') }}; do
+        for p in {{ ((['openlive'] if openlive_enabled else []) + (['intercom'] if intercom_enabled else []) + (['monitoring'] if monitoring_enabled else []) + (['owntracks'] if owntracks_enabled else [])) | join(' ') }}; do
           bad=$(docker ps -a --filter label=com.docker.compose.project=$p --format '{{ '{{' }}.Names{{ '}}' }} {{ '{{' }}.State{{ '}}' }}' | grep -v ' running$' || true)
           [ -z "$bad" ] || { echo "$p: $bad"; exit 1; }
           echo "$p: $(docker ps -q --filter label=com.docker.compose.project=$p | wc -l) running"
@@ -66,6 +66,38 @@
         validate_certs: false
         follow_redirects: none
         status_code: [302, 401]
+
+    - name: OwnTracks Recorder answers
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ owntracks_recorder_port }}/"
+      retries: 12
+      delay: 10
+      register: otr
+      until: otr is not failed
+      when: owntracks_enabled | bool
+
+    - name: OwnTracks map needs the operator login, /pub an app login
+      ansible.builtin.uri:
+        url: "https://{{ obcell_lan_ip }}:{{ owntracks_https_port }}{{ item.path }}"
+        method: "{{ item.method }}"
+        validate_certs: false
+        follow_redirects: none
+        status_code: "{{ item.status }}"
+      loop:
+        - {path: /, method: GET, status: [302, 401]}
+        - {path: /api/0/last, method: GET, status: [302, 401]}
+        - {path: /pub, method: POST, status: [401]}
+      loop_control:
+        label: "{{ item.method }} {{ item.path }}"
+      when: owntracks_enabled | bool
+
+    - name: Tailscale Funnel serves OwnTracks /pub
+      ansible.builtin.command: tailscale serve status --json
+      register: funnel
+      changed_when: false
+      failed_when: >-
+        not ((funnel.stdout | from_json).AllowFunnel | default({})).get(obcell_tailnet_name ~ ':' ~ owntracks_funnel_port, false)
+      when: owntracks_enabled | bool and owntracks_funnel | bool
 
     - name: Subscribers provisioned
       ansible.builtin.command: mongosh --quiet open5gs --eval 'print(db.subscribers.countDocuments())'

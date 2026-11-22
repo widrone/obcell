@@ -81,6 +81,10 @@ scrape_configs:
         labels: {service: openwebrx, module: http_up}
       - targets: ['http://127.0.0.1:9103/status']
         labels: {service: {{ control_unit }}, module: http_up}
+{% if owntracks_enabled %}
+      - targets: ['http://127.0.0.1:{{ owntracks_recorder_port }}/']
+        labels: {service: owntracks, module: http_up}
+{% endif %}
 {% if obcell_tailnet_name %}
       - targets: ['https://{{ obcell_tailnet_name }}/']
         labels: {service: front-door-tailnet, module: https_frontdoor}
