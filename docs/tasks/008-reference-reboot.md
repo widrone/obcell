@@ -61,3 +61,23 @@ The human rebooted the reference Obcell at 12:21 (cell off, radio feed off). Che
 | Snapshot diff | the reboot-test snapshot (`~/obcell-backups/reboot-test/snapshot.sh`) is identical to the one from 2026-11-19 |
 
 No manual steps were needed, so there are no fix tasks.
+
+### 2026-11-22: second reboot, passed with no manual steps
+
+Run again after the Ubuntu release work (tasks 001-005) and OwnTracks (task 011), so the Obcell now also runs an OwnTracks stack. The reference Obcell was rebooted at the human's request at 13:17 (cell off, radio feed off). The before-state was saved at 13:15 and compared about 2 minutes after boot:
+
+| Check | Result |
+|---|---|
+| Snapshot diff (`snapshot.sh`, now with an OwnTracks section) | identical before and after |
+| `ansible-playbook verify.yml` | ok=11 changed=0 failed=0 |
+| `ansible-playbook site.yml --check --diff` | ok=168 changed=0 failed=0 |
+| `obcell status` | off air, 18/18 Open5GS services, containers 7/7 + 5/5 + 11/11 + 1/1 (OwnTracks), 14/14 services answering, no alerts, radio feed off |
+| gNB | `gnb-n40` inactive + disabled, CPUAffinity/AllowedCPUs 0-1 |
+| UE NAT / forwarding | `-A POSTROUTING -s 10.45.0.0/16 ! -o ogstun -j MASQUERADE`, ip_forward=1, ogstun 10.45.0.1/16 |
+| Tailnet | all nine HTTPS sites answer on the ts.net name with valid certificates (Authelia redirect, or 200 for the Intercom guest page and the OwnTracks `/join/` page) |
+| USB | `lsusb` shows the LimeSDR Mini and the RTL-SDR; usb1 power/control `on` |
+| Failed units | none |
+
+No manual steps were needed, so there are no fix tasks.
+
+Correction to the 2026-11-21 row "no overcurrent messages": the kernel logs one `usb usb1-port4: over-current condition` at every boot, that boot included. Port 4 is a known dead connector on the reference hardware. That is a hardware fault the playbook cannot fix, so it gets no task.
