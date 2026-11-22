@@ -81,11 +81,25 @@
       failed_when: false
       check_mode: false
 
-    # A version pattern, so a box on another major moves to nodejs_major (up or down).
+    - name: Node.js major installed before this run
+      ansible.builtin.set_fact:
+        node_before_major: >-
+          {{ node_before.stdout | regex_search('^installed ([0-9]+)\.', '\1') | default(['none'], true) | first }}
+
+    # apt only picks an older version than the installed one at pin priority >= 1000, so
+    # going down is a manual step.
+    - name: Node.js only moves up
+      ansible.builtin.assert:
+        that: node_before_major == 'none' or node_before_major | int <= nodejs_major | int
+        fail_msg: >-
+          Node.js {{ node_before_major }} is installed and nodejs_major is {{ nodejs_major }}.
+          site.yml only moves Node.js up. To go down, run `sudo apt-get purge nodejs` on the box first.
+        quiet: true
+
+    # A version pattern, so a box on an older major moves up to nodejs_major.
     - name: Node.js {{ nodejs_major }}
       ansible.builtin.apt:
         name: "nodejs={{ nodejs_major }}.*"
-        allow_downgrade: true
         update_cache: "{{ node_repo is changed }}"
       when: not (ansible_check_mode and node_repo is changed)
 
@@ -115,8 +129,7 @@
         webui_build_wanted: "open5gs {{ open5gs_version }} node {{ nodejs_major }}"
         webui_build_have: >-
           {{ webui_stamp.stdout if webui_stamp.rc == 0 else
-             'open5gs ' ~ open5gs_version ~ ' node '
-             ~ (node_before.stdout | regex_search('^installed ([0-9]+)\.', '\1') | default(['none'], true) | first) }}
+             'open5gs ' ~ open5gs_version ~ ' node ' ~ node_before_major }}
 
     - name: WebUI would be rebuilt (check mode)
       ansible.builtin.debug:

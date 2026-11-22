@@ -76,6 +76,8 @@ wipe_mongodb() {
   cx 'systemctl stop mongod; DEBIAN_FRONTEND=noninteractive apt-get purge -y -q "mongodb-org*" >/dev/null
       rm -rf /var/lib/mongodb /var/log/mongodb /etc/apt/sources.list.d/mongodb-org-*.list /usr/share/keyrings/mongodb-server-*.gpg'
 }
+# site.yml only moves Node.js up, so going back to 20 starts without Node.js.
+purge_nodejs() { cx 'DEBIAN_FRONTEND=noninteractive apt-get purge -y -q nodejs >/dev/null'; }
 restore_dump() {   # $1 = archive inside the container; replaces the open5gs database
   cx "mongorestore --quiet --drop --gzip --archive=$1 --nsInclude='open5gs.*'
       systemctl restart open5gs-udrd open5gs-pcfd open5gs-hssd open5gs-pcrfd open5gs-webui"
@@ -120,6 +122,7 @@ case $CMD in
   reset-old)
     t0=$(date +%s)
     wipe_mongodb
+    purge_nodejs
     play site.yml --tags open5gs -e mongodb_version=6.0 -e nodejs_major=20
     restore_dump "$W/reference.archive.gz"
     echo "TIME reset-old $(( $(date +%s) - t0 ))"
