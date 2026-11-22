@@ -171,6 +171,11 @@ services:
 {% endif %}
       - caddy_data:/data
       - caddy_config:/config
+{% if owntracks_enabled %}
+    environment:
+      # The secret end of the OwnTracks post URL, kept in .env rather than in the Caddyfile.
+      OWNTRACKS_PUB_TOKEN: ${OWNTRACKS_PUB_TOKEN}
+{% endif %}
 
 volumes:
   couchdb_data:

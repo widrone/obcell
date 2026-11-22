@@ -11,6 +11,7 @@
     owner: "{{ obcell_user }}"
     group: "{{ obcell_user }}"
     mode: "0775"
+  register: _otr_dir
 
 # The Recorder runs as root in its container. The history says where people were: root only.
 - name: Location history (Recorder store)
@@ -82,6 +83,7 @@
     project_src: "{{ obcell_home }}/owntracks"
     state: present
     remove_orphans: false
+  when: not (ansible_check_mode and _otr_dir is changed)   # a --check before the first install
 
 # ---------------------------------------------------------------- Tailscale Funnel (public /pub)
 - name: Funnel needs the tailnet

@@ -77,7 +77,7 @@
     mode: "{{ item.mode | default('0664') }}"
   loop:
     - {src: compose.yml.j2, dest: compose.yml}
-    - {src: caddy/Caddyfile.j2, dest: caddy/Caddyfile, mode: "0640"}   # OwnTracks login hashes
+    - {src: caddy/Caddyfile.j2, dest: caddy/Caddyfile}
   loop_control:
     label: "{{ item.dest }}"
   register: stack_files

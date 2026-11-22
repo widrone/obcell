@@ -6,9 +6,13 @@
 
 {% if owntracks_enabled %}
 # OwnTracks Recorder (~/owntracks). No logins on the phones: the URL they post to ends in a secret
-# token, so knowing the address isn't enough. The Recorder only accepts POST /pub.
+# token (OWNTRACKS_PUB_TOKEN, from ../.env), so knowing the address isn't enough. Without the token
+# nothing matches. The Recorder only accepts POST /pub.
 (owntracks_pub) {
-	@owntracks_pub path /pub/{{ owntracks_pub_token }}
+	@owntracks_pub {
+		path /pub/{$OWNTRACKS_PUB_TOKEN}
+		not path /pub/
+	}
 	handle @owntracks_pub {
 		rewrite * /pub
 		reverse_proxy 127.0.0.1:{{ owntracks_recorder_port }}
