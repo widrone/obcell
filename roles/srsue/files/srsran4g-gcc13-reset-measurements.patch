@@ -1,0 +1,20 @@
+Local patch (Obcell): backport of srsRAN_4G commit 76a1131d1d0a ("fix issues detected during
+gcc 13.2.0 compilation", Piotr Gawlowicz, 2024-04-25), which no release tag contains yet.
+Only the srsue hunk; the srsenb header it also touches doesn't exist in release_23_11.
+
+phy_common::reset_measurements(cc_idx >= SRSRAN_MAX_CARRIERS) resets every carrier and then
+fell through to write index cc_idx of the per-carrier arrays: an out-of-bounds write on every
+phy_common::reset(). GCC 13 (Ubuntu 24.04) stops the build on it with -Werror=array-bounds.
+
+diff --git a/srsue/src/phy/phy_common.cc b/srsue/src/phy/phy_common.cc
+index 58ad6a5ca0f..d87949730c7 100644
+--- a/srsue/src/phy/phy_common.cc
++++ b/srsue/src/phy/phy_common.cc
+@@ -646,6 +646,7 @@ void phy_common::reset_measurements(uint32_t cc_idx)
+     for (uint32_t cc = 0; cc < SRSRAN_MAX_CARRIERS; cc++) {
+       reset_measurements(cc);
+     }
++    return;
+   }
+ 
+   // Default all metrics to NAN to prevent providing invalid information on traces and other layers

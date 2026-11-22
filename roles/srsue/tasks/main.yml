@@ -11,7 +11,8 @@
     dest: "{{ obcell_home }}/srsRAN_4G"
     version: "{{ srsran4g_version }}"
     owner: "{{ obcell_user }}"
-    patches: []
+    # Upstream fix for an out-of-bounds write that GCC 13 (24.04) refuses to compile.
+    patches: ["{{ role_path ~ '/files/srsran4g-gcc13-reset-measurements.patch' }}"]
 
 - name: srsUE binary present?
   ansible.builtin.stat:
