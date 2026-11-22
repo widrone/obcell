@@ -1,18 +1,16 @@
 # ---------------------------------------------------------------- MongoDB (subscriber database)
-- name: MongoDB key
-  ansible.builtin.include_tasks: ../../common/tasks/apt_keyring.yml
-  vars:
-    key_url: "https://www.mongodb.org/static/pgp/server-{{ mongodb_version }}.asc"
-    keyring: "/usr/share/keyrings/mongodb-server-{{ mongodb_version }}.gpg"
+- name: MongoDB series
+  ansible.builtin.include_tasks: mongodb_series.yml
+
+- name: MongoDB upgrade pending
+  ansible.builtin.debug:
+    msg: >-
+      MongoDB {{ mongodb_series }} is installed and the playbook wants {{ mongodb_version }}.
+      Keeping {{ mongodb_series }}; run upgrade.yml to move the data (docs/upgrades.md).
+  when: mongodb_series != mongodb_version
 
 - name: MongoDB repository
-  ansible.builtin.copy:
-    dest: "/etc/apt/sources.list.d/mongodb-org-{{ mongodb_version }}.list"
-    mode: "0644"
-    content: >
-      deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-{{ mongodb_version }}.gpg ]
-      https://repo.mongodb.org/apt/ubuntu {{ mongodb_repo_release }}/mongodb-org/{{ mongodb_version }} multiverse
-  register: mongo_repo
+  ansible.builtin.include_tasks: mongodb_repo.yml
 
 - name: Open5GS PPA
   ansible.builtin.include_tasks: ../../common/tasks/ppa.yml
@@ -75,19 +73,60 @@
           Pin: origin deb.nodesource.com
           Pin-Priority: 600
 
-    - name: Node.js
+    - name: Node.js installed before this run
+      ansible.builtin.command:
+        argv: [dpkg-query, -W, "-f=${db:Status-Status} ${Version}", nodejs]
+      register: node_before
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    # A version pattern, so a box on another major moves to nodejs_major (up or down).
+    - name: Node.js {{ nodejs_major }}
       ansible.builtin.apt:
-        name: nodejs
+        name: "nodejs={{ nodejs_major }}.*"
+        allow_downgrade: true
         update_cache: "{{ node_repo is changed }}"
+      when: not (ansible_check_mode and node_repo is changed)
+
+    # Check mode doesn't fetch the new repository, so apt can't see its packages yet.
+    - name: Node.js {{ nodejs_major }} would come from the new repository (check mode)
+      ansible.builtin.debug:
+        msg: "nodejs {{ node_before.stdout | default('not installed', true) }} -> {{ nodejs_major }}.x"
+      changed_when: true
+      when: ansible_check_mode and node_repo is changed
 
     - name: WebUI installed?
       ansible.builtin.stat:
         path: /usr/lib/node_modules/open5gs/server/index.js
       register: webui
 
+    # What the installed WebUI was built from. Builds older than the stamp count as built
+    # with open5gs_version and the Node.js that was installed before this run.
+    - name: WebUI build stamp
+      ansible.builtin.command: cat /usr/lib/node_modules/open5gs/.obcell-build
+      register: webui_stamp
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Is the WebUI build current?
+      ansible.builtin.set_fact:
+        webui_build_wanted: "open5gs {{ open5gs_version }} node {{ nodejs_major }}"
+        webui_build_have: >-
+          {{ webui_stamp.stdout if webui_stamp.rc == 0 else
+             'open5gs ' ~ open5gs_version ~ ' node '
+             ~ (node_before.stdout | regex_search('^installed ([0-9]+)\.', '\1') | default(['none'], true) | first) }}
+
+    - name: WebUI would be rebuilt (check mode)
+      ansible.builtin.debug:
+        msg: "WebUI: {{ webui_build_have if webui.stat.exists else 'not installed' }} -> {{ webui_build_wanted }}"
+      changed_when: true
+      when: ansible_check_mode and (not webui.stat.exists or webui_build_have != webui_build_wanted)
+
     # Same steps as https://open5gs.org/open5gs/assets/webui/install, pinned to open5gs_version.
     - name: Build the WebUI
-      when: not webui.stat.exists
+      when: (not webui.stat.exists or webui_build_have != webui_build_wanted) and not ansible_check_mode
       block:
         - name: WebUI build directory
           ansible.builtin.tempfile:
@@ -106,11 +145,21 @@
           args:
             chdir: "{{ webui_tmp.path }}/open5gs-{{ open5gs_version }}/webui"
 
+        # A rebuild replaces the old tree but keeps its .env (the WebUI's session and JWT
+        # secrets), so nobody is logged out.
         - name: Install to /usr/lib/node_modules/open5gs
           ansible.builtin.shell: |
+            set -e
+            new={{ webui_tmp.path }}/open5gs-{{ open5gs_version }}/webui
+            dst=/usr/lib/node_modules/open5gs
             mkdir -p /usr/lib/node_modules
-            mv {{ webui_tmp.path }}/open5gs-{{ open5gs_version }}/webui /usr/lib/node_modules/open5gs
-            chown -R open5gs:open5gs /usr/lib/node_modules/open5gs
+            if [ -f "$dst/.env" ]; then cp -p "$dst/.env" "$new/.env"; fi
+            rm -rf "$dst.old"
+            if [ -d "$dst" ]; then mv "$dst" "$dst.old"; fi
+            mv "$new" "$dst"
+            chown -R open5gs:open5gs "$dst"
+            rm -rf "$dst.old"
+          notify: Restart open5gs-webui
 
         - name: Default WebUI admin account (admin / 1423) if none exists
           ansible.builtin.command: mongosh --quiet open5gs {{ webui_tmp.path }}/open5gs-{{ open5gs_version }}/docs/assets/webui/mongo-init.js
@@ -122,6 +171,15 @@
             path: "{{ webui_tmp.path }}"
             state: absent
           when: webui_tmp.path is defined
+
+    - name: WebUI build stamp written
+      ansible.builtin.copy:
+        dest: /usr/lib/node_modules/open5gs/.obcell-build
+        content: "{{ webui_build_wanted }}\n"
+        owner: open5gs
+        group: open5gs
+        mode: "0644"
+      when: not ansible_check_mode or webui.stat.exists
 
     - name: WebUI service
       ansible.builtin.template:

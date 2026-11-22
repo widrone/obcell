@@ -1,0 +1,31 @@
+# The MongoDB apt repository and key for one series (var: mongodb_series); removes the
+# repositories and keys of other series, so apt can't pick a different major by itself.
+- name: MongoDB {{ mongodb_series }} key
+  ansible.builtin.include_tasks: ../../common/tasks/apt_keyring.yml
+  vars:
+    key_url: "https://www.mongodb.org/static/pgp/server-{{ mongodb_series }}.asc"
+    keyring: "/usr/share/keyrings/mongodb-server-{{ mongodb_series }}.gpg"
+
+- name: MongoDB {{ mongodb_series }} repository
+  ansible.builtin.copy:
+    dest: "/etc/apt/sources.list.d/mongodb-org-{{ mongodb_series }}.list"
+    mode: "0644"
+    content: >
+      deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-{{ mongodb_series }}.gpg ]
+      https://repo.mongodb.org/apt/ubuntu {{ mongodb_repo_release }}/mongodb-org/{{ mongodb_series }} multiverse
+  register: mongo_repo
+
+- name: Repositories and keys of other MongoDB series
+  ansible.builtin.find:
+    paths: [/etc/apt/sources.list.d, /usr/share/keyrings]
+    patterns: ["mongodb-org-*.list", "mongodb-server-*.gpg"]
+    excludes: ["mongodb-org-{{ mongodb_series }}.list", "mongodb-server-{{ mongodb_series }}.gpg"]
+  register: mongo_repo_old
+
+- name: Remove them
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ mongo_repo_old.files }}"
+  loop_control:
+    label: "{{ item.path }}"

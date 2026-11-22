@@ -1,0 +1,16 @@
+# Which MongoDB series this box runs (sets mongodb_series): the installed one, or
+# mongodb_version on a box without MongoDB. Moving a box to another series is a data
+# migration, so only upgrade.yml does it (docs/upgrades.md), never site.yml on the side.
+- name: Installed MongoDB server
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, "-f=${db:Status-Status} ${Version}", mongodb-org-server]
+  register: mongodb_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: MongoDB series of this box
+  ansible.builtin.set_fact:
+    mongodb_series: >-
+      {{ mongodb_installed.stdout | regex_search('^installed ([0-9]+\.[0-9]+)\.', '\1')
+         | default([mongodb_version], true) | first }}
