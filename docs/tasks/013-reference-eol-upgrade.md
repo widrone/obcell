@@ -16,11 +16,12 @@ the WebUI login unchanged, and `site.yml --check --diff` back at `changed=0`.
 
 - The procedure is [docs/upgrades.md](../upgrades.md), tested in [task 009](009-eol-upgrades.md).
 - The reference Obcell is a 22.04 box on MongoDB 6.0.30 and Node.js 20.20.2 (2026-11-22).
-- Read-only previews on it (2026-11-22, branch `eol-upgrades`, before the defaults changed):
-  - `upgrade.yml --check -e mongodb_version=8.0`: plan `MongoDB 6.0 -> 7.0 -> 8.0`, the cell is off air.
-  - `site.yml --tags open5gs --check -e nodejs_major=24 -e mongodb_version=8.0`: 4 changes
-    (NodeSource repository, Node.js, WebUI rebuild, build stamp) plus the
-    "MongoDB upgrade pending" note.
+- Read-only previews on it (2026-11-22, branch `eol-upgrades` at d648aaa, defaults 8.0 / 24):
+  - `upgrade.yml --check`: plan `MongoDB 6.0 -> 7.0 -> 8.0`, the cell is off air.
+  - `site.yml --check --diff` (all roles): `changed=4`, all in the open5gs role: NodeSource
+    repository (`node_20.x` → `node_24.x`), `Node.js 24 would come from the new repository`,
+    `WebUI would be rebuilt` (`open5gs 2.8.0 node 20 -> open5gs 2.8.0 node 24`), and the new
+    build stamp. Plus the "MongoDB upgrade pending" note.
 - Its WebUI was installed by hand before the automation. It has the `.env` with both
   secrets, which the rebuild keeps.
 
