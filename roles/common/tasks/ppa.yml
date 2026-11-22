@@ -1,4 +1,5 @@
 # Add a Launchpad PPA unless some sources file already points at it (vars: ppa = "owner/name").
+# Sets ppa_added (changed when apt_repository added it; callers then refresh the apt cache).
 - name: "PPA {{ ppa }} already configured?"
   ansible.builtin.shell: grep -rqs "ppa.launchpadcontent.net/{{ ppa }}/\|ppa.launchpad.net/{{ ppa }}/" /etc/apt/sources.list /etc/apt/sources.list.d/
   register: _ppa_present
@@ -6,8 +7,29 @@
   failed_when: false
   check_mode: false
 
+# apt 3 (Ubuntu 26.04) has no apt-key. Without it, apt_repository's PPA support runs
+# `gpg --export` without ever fetching the key and fails ("Unable to get required signing
+# key"). There, use Ubuntu's own add-apt-repository: it writes a deb822 .sources file with
+# the key in Signed-By and refreshes the apt cache itself.
+- name: "PPA {{ ppa }}: apt-key available?"
+  ansible.builtin.stat:
+    path: /usr/bin/apt-key
+  register: _ppa_apt_key
+  when: _ppa_present.rc != 0
+
 - name: "PPA {{ ppa }}"
   ansible.builtin.apt_repository:
     repo: "ppa:{{ ppa }}"
-  when: _ppa_present.rc != 0
+  when: _ppa_present.rc != 0 and _ppa_apt_key.stat.exists
   register: ppa_added
+
+- name: "PPA {{ ppa }} (add-apt-repository, no apt-key here)"
+  when: _ppa_present.rc != 0 and not _ppa_apt_key.stat.exists
+  block:
+    - name: "PPA {{ ppa }}: add-apt-repository present"
+      ansible.builtin.apt:
+        name: software-properties-common
+
+    - name: "PPA {{ ppa }}: add it"
+      ansible.builtin.command: add-apt-repository --yes ppa:{{ ppa }}
+      changed_when: true
