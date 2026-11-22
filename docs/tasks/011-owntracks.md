@@ -40,7 +40,7 @@ internet, the tailnet, the LAN and the Obcell's own cell. The map is behind the 
 
 ## Done when
 
-- [ ] The LXD matrix passes with OwnTracks on (install, verify, idempotent `changed=0`).
+- [x] The LXD matrix passes with OwnTracks on (install, verify, idempotent `changed=0`).
 - [ ] The reference Obcell runs it; `verify.yml` passes, including the Funnel check.
 - [ ] An iPhone and an Android phone are set up from the QR code and show up on the map from
       mobile data. From outside the tailnet, `https://<tailnet name>:10000/` gives 404.
@@ -77,3 +77,14 @@ can't print it (900d6e0).
 - **Funnel not on yet:** the node has no `funnel` capability in the tailnet policy. Until it
   does, the setup code holds the tailnet URL, so phones need the Tailscale app.
 - **Still to do:** 24.04 and 26.04 with OwnTracks, the Funnel steps, real phones.
+
+### 2026-11-22 (24.04 and 26.04)
+
+| Release | ansible-core | Install | Health | Idempotent | NG Setup | UE end-to-end | Minutes |
+|---|---|---|---|---|---|---|---|
+| 26.04 (obcell-resolute) | 2.20.11 (inside) | PASS | PASS | PASS | PASS | PASS | 13 |
+| 24.04 (obcell-noble) | 2.20.11 (inside) | PASS | PASS | PASS | PASS | PASS | 40 |
+
+(f3a29ed. 26.04 reused its container; 24.04 was fresh.) The OwnTracks end-to-end check
+passes 18/18 in both containers. `qrencode` installs from the archive on both. Left: the Funnel
+steps and real phones.
