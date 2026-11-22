@@ -118,13 +118,12 @@ monitoring_enabled: true
 owntracks_enabled: true                         # needs openlive_enabled (Caddy is its front door)
 
 # OwnTracks Recorder (~/owntracks): phones running the OwnTracks app report their position over
-# HTTPS (the app's HTTP mode; no MQTT broker). The map is behind the operator login; phones log
-# in to /pub with their own username and password (generated into secrets/<host>/).
-owntracks_users:                                # one per person or phone; the app's "Username"
-  - name: crew
-owntracks_https_port: 2443                      # map + /pub on every name/IP (LAN, tailnet, the cell)
-# Tailscale Funnel: /pub (and nothing else) on the public internet at
-# https://<obcell_tailnet_name>:<owntracks_funnel_port>/pub, with a Let's Encrypt certificate.
+# HTTPS (the app's HTTP mode; no MQTT broker). No logins on the phones: the URL they post to ends
+# in a secret token (owntracks_pub_token), handed out by the setup page's QR code at
+# https://<name>:<owntracks_https_port>/join/ and http://<LAN IP>/join/. The map needs the operator login.
+owntracks_https_port: 2443                      # map, setup page and the post URL on every name/IP
+# Tailscale Funnel: the post URL (and nothing else) on the public internet at
+# https://<obcell_tailnet_name>:<owntracks_funnel_port>/pub/<token>, with a Let's Encrypt certificate.
 # Needs tailscale_enabled, obcell_tailnet_name, and Funnel allowed for this node in the tailnet policy.
 owntracks_funnel: false
 owntracks_funnel_port: 10000                    # Funnel only offers 443, 8443 and 10000; Caddy has the first two

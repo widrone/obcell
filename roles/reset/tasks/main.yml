@@ -37,7 +37,7 @@
   ansible.builtin.set_fact:
     _purge: >-
       {{ (_installed | select('match', '^(open5gs|mongodb-)') | list)
-         + (_installed | intersect(['nodejs'] + reset_sdr_packages + reset_build_deps))
+         + (_installed | intersect(['nodejs', 'qrencode'] + reset_sdr_packages + reset_build_deps))
          + (_installed | intersect(reset_docker_packages) if reset_remove_docker | bool else [])
          + (_installed | intersect(['tailscale']) if reset_remove_tailscale | bool else []) }}
 

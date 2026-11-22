@@ -95,11 +95,12 @@ print(d["participant"], "into", n, "Radio line(s)" + ("" if ok==n else " (%d not
   lbl tailscale; printf '%s · https://%s\n' "$ts" "$TS_NAME"
 [% if owntracks_enabled %]
   lbl owntracks; printf '%s\n' "$(curl -s -m 2 http://127.0.0.1:[= owntracks_recorder_port =]/api/0/last | python3 -c 'import json,sys,time
-try: d=[x for x in json.load(sys.stdin) if x.get("username") != "ping"]
+try: d=json.load(sys.stdin)
 except Exception: print("recorder not answering (obcell up owntracks)"); sys.exit()
-if not d: print("no phone has reported yet"); sys.exit()
+d=[x for x in d if x.get("username") != "ping"] if isinstance(d, list) else []
+if not d: print("no phone has reported yet · add one: obcell owntracks"); sys.exit()
 age=int(time.time() - max(x.get("tst", 0) for x in d))
-print("%d phone(s) · newest report %s ago" % (len(d), "%d min" % (age // 60) if age < 86400 else "%d days" % (age // 86400)))' 2>/dev/null)[% if owntracks_funnel %] · public https://[= obcell_tailnet_name =]:[= owntracks_funnel_port =]/pub[% endif %]"
+print("%d phone(s) · newest report %s ago" % (len(d), "%d min" % (age // 60) if age < 86400 else "%d days" % (age // 86400)))' 2>/dev/null)[% if owntracks_funnel %] · public via Funnel :[= owntracks_funnel_port =][% endif %]"
 [% endif %]
 
   lbl host; printf 'load %s · mem free %s · disk free %s · temp %s°C · up %s\n' \
@@ -233,7 +234,7 @@ cmd_backup() {
 [% if owntracks_enabled %]
   # OwnTracks: where the phones have been (the Recorder's store), and the app logins.
   sudo tar -C "$HOME/owntracks" -cf "$work/owntracks-store.tar" store 2>/dev/null || echo "  ! OwnTracks store not found"
-  extra+=("${HOME#/}/owntracks/compose.yml" "${HOME#/}/owntracks/CREDENTIALS.txt")
+  extra+=("${HOME#/}/owntracks/compose.yml" "${HOME#/}/owntracks/app-config.uri")
 [% endif %]
   sudo tar -czf "$out" \
     --exclude='*/node_modules' --exclude='*/.git' \
@@ -251,6 +252,19 @@ cmd_backup() {
   echo "contains secrets (SIM keys, passwords, CA key): copy it somewhere safe, not somewhere public."
 }
 
+[% if owntracks_enabled %]
+# ---------------------------------------------------------------- owntracks
+# Phone setup: the same QR code as the setup page, in the terminal.
+cmd_owntracks() {
+  local uri
+  uri=$(cat "$HOME/owntracks/app-config.uri" 2>/dev/null) || die "no ~/owntracks/app-config.uri (run the playbook with --tags owntracks)"
+  echo "$(bold 'Add a phone to OwnTracks'): install the app, then scan this with the phone's camera."
+  qrencode -t ANSIUTF8 -m 2 "$uri" || die "qrencode missing (sudo apt install qrencode)"
+  echo "Setup page (no login): [= owntracks_join_urls | join(' · ') =]"
+  echo "Then set username, device ID and tracker ID in the app. Map: https://$TS_NAME:[= owntracks_https_port =]/"
+}
+
+[% endif %]
 # ---------------------------------------------------------------- slides
 cmd_slides() {
   local dir=$HOME/presentation dest=$HOME/monitoring/homepage/images/presentation
@@ -280,6 +294,9 @@ $(bold obcell) - operate the [= obcell_name =] Obcell (private 5G + remote produ
 
   obcell reload <what>             validated reload: caddy | authelia | prometheus | blackbox | homepage | grafana | control
   obcell backup                    configs + Open5GS subscribers + Open Live productions[% if owntracks_enabled %] + OwnTracks history[% endif %] + CA → ~/obcell-backups
+[% if owntracks_enabled %]
+  obcell owntracks                 QR code that sets up a phone's OwnTracks app (also on https://<name>:[= owntracks_https_port =]/join/)
+[% endif %]
   obcell slides                    re-render ~/presentation/*.html to PNG and publish on Homepage
 EOF
 }
@@ -301,6 +318,9 @@ case "$cmd" in
   reload) cmd_reload "$@" ;;
   backup) cmd_backup ;;
   slides) cmd_slides ;;
+[% if owntracks_enabled %]
+  owntracks|join) cmd_owntracks ;;
+[% endif %]
   help|-h|--help) cmd_help ;;
   *) cmd_help; exit 1 ;;
 esac

@@ -12,3 +12,16 @@ container_cpuset_line: >-
   {{ ('cpuset: "' ~ (container_cpus | join(',')) ~ '"') if cpu_pinning | bool else '# cpuset: not pinned (cpu_pinning: false)' }}
 gnb_cpu_range: "{{ gnb_cpus | obcell_cpu_range if cpu_pinning | bool else 'any' }}"
 container_cpu_range: "{{ container_cpus | obcell_cpu_range if cpu_pinning | bool else 'any' }}"
+
+# OwnTracks: where the apps post (in the setup QR code). Through Funnel it works from anywhere with
+# internet; otherwise on the tailnet name (phones with Tailscale) or the LAN IP (phones that trust
+# Caddy's CA). Override owntracks_app_server to pick another address.
+owntracks_app_server: >-
+  {{ ('https://' ~ obcell_tailnet_name ~ ':' ~ owntracks_funnel_port) if owntracks_funnel | bool
+     else ('https://' ~ (obcell_tailnet_name or obcell_lan_ip) ~ ':' ~ owntracks_https_port) }}
+owntracks_app_url: "{{ owntracks_app_server }}/pub/{{ owntracks_pub_token }}"
+# The app's minimal setup: HTTP mode and the URL. Username, device and tracker ID stay unset, so one
+# code fits every phone; people set them in the app.
+owntracks_app_config: {_type: configuration, mode: 3, url: "{{ owntracks_app_url }}", auth: false}
+owntracks_app_config_uri: "owntracks:///config?inline={{ owntracks_app_config | to_json(separators=(',', ':')) | b64encode | urlencode }}"
+owntracks_join_urls: "{{ (obcell_names_ip | obcell_urls(owntracks_https_port) | map('regex_replace', '$', '/join/') | list) + ['http://' ~ obcell_lan_ip ~ '/join/'] }}"

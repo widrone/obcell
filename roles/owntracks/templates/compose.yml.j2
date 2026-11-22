@@ -1,10 +1,11 @@
 # OwnTracks Recorder on {{ obcell_name }}: where the crew's phones are (OwnTracks app, HTTP mode).
 #
-# Browser + app entry point: https://{{ obcell_mdns_name }}:{{ owntracks_https_port }} (Caddy, see ~/openlive/caddy/Caddyfile)
-#   /pub            -> the Recorder, app login (Caddy basic auth; the username becomes the OwnTracks user)
+# Entry point: https://{{ obcell_mdns_name }}:{{ owntracks_https_port }} (Caddy, see ~/openlive/caddy/Caddyfile)
+#   /pub/<token>    -> the Recorder's POST /pub, no login (the token is the secret; ~/owntracks/app-config.uri)
+#   /join/          -> phone setup page with the QR code, no login (also http://{{ obcell_lan_ip }}/join/)
 #   everything else -> the Recorder's map, table and API, operator login (Authelia)
 {% if owntracks_funnel %}
-# Public: https://{{ obcell_tailnet_name }}:{{ owntracks_funnel_port }}/pub via Tailscale Funnel -> Caddy 127.0.0.1:{{ owntracks_funnel_local_port }} (/pub only).
+# Public: https://{{ obcell_tailnet_name }}:{{ owntracks_funnel_port }}/pub/<token> via Tailscale Funnel -> Caddy 127.0.0.1:{{ owntracks_funnel_local_port }} (post URL only).
 {% endif %}
 # The Recorder has no login of its own, so it only listens on 127.0.0.1. No MQTT broker.
 #

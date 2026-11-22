@@ -23,15 +23,14 @@ One Authelia login covers everything except Intercom guests.
 | OpenWebRX+ (RTL-SDR) | `:6443` | `:6443` |
 | Open5GS WebUI (subscribers; then its own admin password) | `:{{ open5gs_webui_https_port }}` | `:{{ open5gs_webui_https_port }}` |
 {% if owntracks_enabled %}
-| OwnTracks map (phones post to `/pub` with an app login) | `:{{ owntracks_https_port }}` | `:{{ owntracks_https_port }}` |
+| OwnTracks map (phone setup page: `/join/`, no login) | `:{{ owntracks_https_port }}` | `:{{ owntracks_https_port }}`, or `http://{{ obcell_lan_ip }}/join/` |
 {% endif %}
 
 - **Tailnet:** uses real Let's Encrypt certificates, fetched by Caddy from tailscaled.
 - **LAN:** uses Caddy's internal CA. Devices need `~/openlive/openlive-root-ca.crt` installed.
 - **Old LAN address:** `https://{{ obcell_mdns_name }}` used to be Open Live. Bookmarks now land on Homepage; Open Live is on `:7443`. `https://{{ obcell_lan_ip }}` redirects to the LAN portal.
 {% if owntracks_enabled %}
-- **OwnTracks phones:** the app (Mode HTTP) posts to `/pub` with its own username and password from `~/owntracks/CREDENTIALS.txt`; the operator login doesn't work there.{% if owntracks_funnel %} On the internet: **https://{{ obcell_tailnet_name }}:{{ owntracks_funnel_port }}/pub** (Tailscale Funnel, only `/pub`). Phones on the cell or the LAN reach that address through this box's internet uplink.{% endif %}
-
+- **OwnTracks phones:** no logins. The setup page's QR code (or `obcell owntracks` in a terminal) sets the app to HTTP mode with the post URL, which ends in a secret token. People then set their own username, device ID and tracker ID in the app.{% if owntracks_funnel %} The post URL goes through Tailscale Funnel (**https://{{ obcell_tailnet_name }}:{{ owntracks_funnel_port }}**, only the post URL), so it works anywhere with internet; on the cell or the LAN it goes out through this box's uplink.{% endif %} To change the token: delete `secrets/{{ inventory_hostname }}/owntracks_pub_token` on the controller, run the playbook, and set up every phone again.
 {% endif %}
 - **Intercom audio:** goes to UDP {{ obcell_lan_ip }}:10000. Tailnet devices reach it through the approved subnet route {{ obcell_lan_ip }}/32.
 
@@ -44,7 +43,7 @@ One Authelia login covers everything except Intercom guests.
 | Intercom stack | `~/intercom/compose.yml` (+ `.env`) |
 | Monitoring stack | `~/monitoring/compose.yml` |
 {% if owntracks_enabled %}
-| OwnTracks Recorder | `~/owntracks/compose.yml`, location history in `~/owntracks/store/` (root-owned), app logins in `CREDENTIALS.txt` |
+| OwnTracks Recorder | `~/owntracks/compose.yml`, location history in `~/owntracks/store/` (root-owned), the app's setup link in `app-config.uri`, setup page in `~/openlive/caddy/owntracks-join/` |
 {% endif %}
 | Prometheus scrape config and alert rules | `~/monitoring/prometheus/prometheus.yml`, `rules/obcell.yml` |
 | Service probes | `~/monitoring/blackbox/blackbox.yml` |

@@ -4,6 +4,27 @@
 	skip_install_trust
 }
 
+{% if owntracks_enabled %}
+# OwnTracks Recorder (~/owntracks). No logins on the phones: the URL they post to ends in a secret
+# token, so knowing the address isn't enough. The Recorder only accepts POST /pub.
+(owntracks_pub) {
+	@owntracks_pub path /pub/{{ owntracks_pub_token }}
+	handle @owntracks_pub {
+		rewrite * /pub
+		reverse_proxy 127.0.0.1:{{ owntracks_recorder_port }}
+	}
+}
+
+# Phone setup page with the QR code (~/openlive/caddy/owntracks-join, written by the owntracks role).
+(owntracks_join) {
+	redir /join /join/
+	handle_path /join/* {
+		root * /etc/caddy/owntracks-join
+		file_server
+	}
+}
+
+{% endif %}
 # Open Live site body; {args[0]} is the public host[:port] the Studio app should call.
 (openlive_site) {
 	tls internal
@@ -132,7 +153,16 @@ https://{{ obcell_tailnet_name }}:7443 {
 # Port-less IP and plain-http addresses go to the LAN portal (Homepage on https://{{ obcell_mdns_name }}).
 https://{{ obcell_lan_ip }}, http://{{ obcell_lan_ip }}, http://{{ obcell_mdns_name }} {
 	tls internal
+{% if owntracks_enabled %}
+	# Except the OwnTracks phone setup page: on plain HTTP, phones on the LAN or the cell open it
+	# without a certificate warning.
+	import owntracks_join
+	handle {
+		redir https://{{ obcell_mdns_name }}{uri} 302
+	}
+{% else %}
 	redir https://{{ obcell_mdns_name }}{uri} 302
+{% endif %}
 }
 
 # Monitoring (~/monitoring): Grafana and ntopng, by hostname or IP address, operator login required.
@@ -220,19 +250,7 @@ https://{{ obcell_lan_ip }}, http://{{ obcell_lan_ip }}, http://{{ obcell_mdns_n
 }
 {% if owntracks_enabled %}
 
-# OwnTracks Recorder (~/owntracks). Phones post their position to /pub with their own app login;
-# Caddy then sets X-Limit-U, which the Recorder takes as the user, so a login can only write its
-# own track. Everything else (map, table, API) needs the operator login.
-(owntracks_pub) {
-	basic_auth {
-{% for u in owntracks_users %}
-		{{ u.name }} {{ lookup('ansible.builtin.file', obcell_secrets_dir ~ '/owntracks_' ~ u.name ~ '.hash') }}
-{% endfor %}
-	}
-	request_header X-Limit-U {http.auth.user.id}
-	reverse_proxy 127.0.0.1:{{ owntracks_recorder_port }}
-}
-
+# Map, table and API: operator login. Setup page and post URL: no login.
 {{ obcell_names_ip | obcell_urls(owntracks_https_port) | join(', ') }} {
 	tls internal
 	log {
@@ -240,9 +258,8 @@ https://{{ obcell_lan_ip }}, http://{{ obcell_lan_ip }}, http://{{ obcell_mdns_n
 		format json
 	}
 	import monitoring_login
-	handle /pub {
-		import owntracks_pub
-	}
+	import owntracks_pub
+	import owntracks_join
 	handle {
 		forward_auth 127.0.0.1:9091 {
 			uri /authelia/api/authz/forward-auth
@@ -253,16 +270,14 @@ https://{{ obcell_lan_ip }}, http://{{ obcell_lan_ip }}, http://{{ obcell_mdns_n
 }
 {% if owntracks_funnel %}
 
-# Tailscale Funnel's target, on 127.0.0.1 only: the public internet gets /pub and nothing else.
+# Tailscale Funnel's target, on 127.0.0.1 only: the public internet gets the post URL and nothing else.
 http://:{{ owntracks_funnel_local_port }} {
 	bind 127.0.0.1
 	log {
 		output stdout
 		format json
 	}
-	handle /pub {
-		import owntracks_pub
-	}
+	import owntracks_pub
 	handle {
 		respond 404
 	}

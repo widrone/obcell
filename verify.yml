@@ -76,22 +76,24 @@
       until: otr is not failed
       when: owntracks_enabled | bool
 
-    - name: OwnTracks map needs the operator login, /pub an app login
+    - name: OwnTracks map needs the operator login, the setup page none, /pub the token
       ansible.builtin.uri:
-        url: "https://{{ obcell_lan_ip }}:{{ owntracks_https_port }}{{ item.path }}"
+        url: "{{ item.url }}"
         method: "{{ item.method }}"
         validate_certs: false
         follow_redirects: none
         status_code: "{{ item.status }}"
       loop:
-        - {path: /, method: GET, status: [302, 401]}
-        - {path: /api/0/last, method: GET, status: [302, 401]}
-        - {path: /pub, method: POST, status: [401]}
+        - {url: "https://{{ obcell_lan_ip }}:{{ owntracks_https_port }}/", method: GET, status: [302, 401]}
+        - {url: "https://{{ obcell_lan_ip }}:{{ owntracks_https_port }}/api/0/last", method: GET, status: [302, 401]}
+        - {url: "https://{{ obcell_lan_ip }}:{{ owntracks_https_port }}/pub", method: POST, status: [302, 401]}
+        - {url: "https://{{ obcell_lan_ip }}:{{ owntracks_https_port }}/join/", method: GET, status: [200]}
+        - {url: "http://{{ obcell_lan_ip }}/join/", method: GET, status: [200]}
       loop_control:
-        label: "{{ item.method }} {{ item.path }}"
+        label: "{{ item.method }} {{ item.url }}"
       when: owntracks_enabled | bool
 
-    - name: Tailscale Funnel serves OwnTracks /pub
+    - name: Tailscale Funnel serves the OwnTracks post URL
       ansible.builtin.command: tailscale serve status --json
       register: funnel
       changed_when: false

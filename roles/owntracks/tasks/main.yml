@@ -29,14 +29,53 @@
     group: "{{ obcell_user }}"
     mode: "0664"
 
-- name: App logins (CREDENTIALS.txt; diff hidden)
-  ansible.builtin.template:
-    src: CREDENTIALS.txt.j2
-    dest: "{{ obcell_home }}/owntracks/CREDENTIALS.txt"
+# ---------------------------------------------------------------- phone setup (QR code)
+- name: qrencode (QR codes for the setup page and `obcell owntracks`)
+  ansible.builtin.apt:
+    name: qrencode
+
+- name: Setup link for the app (`obcell owntracks` prints it as a QR code)
+  ansible.builtin.copy:
+    content: "{{ owntracks_app_config_uri }}\n"
+    dest: "{{ obcell_home }}/owntracks/app-config.uri"
     owner: "{{ obcell_user }}"
     group: "{{ obcell_user }}"
     mode: "0600"
   diff: false
+
+# qrencode's output only depends on its input, so rendering the codes every run changes nothing.
+- name: QR codes (the app's setup link, and this page for phones whose camera won't open the app)
+  ansible.builtin.command:
+    argv: [qrencode, -t, SVG, --inline, --svg-path, -l, M, -m, "2", -o, "-", "{{ item }}"]
+  loop:
+    - "{{ owntracks_app_config_uri }}"
+    - "http://{{ obcell_lan_ip }}/join/"
+  register: _otr_qr
+  changed_when: false
+  failed_when: false              # in a --check run qrencode may not be installed yet
+  check_mode: false
+  no_log: true
+
+- name: Setup page directory (served by Caddy, no login)
+  ansible.builtin.file:
+    path: "{{ obcell_home }}/openlive/caddy/owntracks-join"
+    state: directory
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0750"
+
+- name: Setup page (holds the secret post URL; diff hidden)
+  ansible.builtin.template:
+    src: join.html.j2
+    dest: "{{ obcell_home }}/openlive/caddy/owntracks-join/index.html"
+    owner: "{{ obcell_user }}"
+    group: "{{ obcell_user }}"
+    mode: "0640"
+  vars:
+    qr_config: "{{ _otr_qr.results[0].stdout }}"
+    qr_page: "{{ _otr_qr.results[1].stdout }}"
+  diff: false
+  when: _otr_qr.results | rejectattr('rc', 'equalto', 0) | list | length == 0
 
 - name: Stack up (OwnTracks Recorder)
   community.docker.docker_compose_v2:
