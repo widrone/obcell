@@ -1,0 +1,28 @@
+Local patch (Obcell): backport of srsRAN_4G commit 95aebad31cdc ("block_queue.h: remove unused
+template param from ctor", 2024-11-12), which no release tag contains yet.
+
+`explicit block_queue<myobj>(...)` names the constructor with a template-id, which C++20
+forbids. GCC 15 (Ubuntu 26.04) warns about it even in C++14 mode
+(-Wtemplate-id-cdtor), and srsRAN's -Werror turns that into a build failure.
+
+diff --git a/lib/include/srsran/common/block_queue.h b/lib/include/srsran/common/block_queue.h
+index a53bd67c0b8..16a420c62e2 100644
+--- a/lib/include/srsran/common/block_queue.h
++++ b/lib/include/srsran/common/block_queue.h
+@@ -44,7 +44,7 @@ class block_queue
+     virtual void pushing(const myobj& obj) = 0;
+   };
+ 
+-  explicit block_queue<myobj>(int capacity_ = -1)
++  explicit block_queue(int capacity_ = -1)
+   {
+     pthread_mutex_init(&mutex, NULL);
+     pthread_cond_init(&cv_empty, NULL);
+@@ -54,6 +54,7 @@ class block_queue
+     enable           = true;
+     num_threads      = 0;
+   }
++
+   ~block_queue()
+   {
+     // Unlock threads waiting at push or pop
