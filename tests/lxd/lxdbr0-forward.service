@@ -1,0 +1,18 @@
+# Lets LXD test containers reach the internet on a host that also runs Docker.
+# Docker sets the iptables FORWARD policy to DROP; these two rules in Docker's DOCKER-USER
+# chain let traffic in and out of LXD's lxdbr0 bridge through, now and after every boot.
+# Only lxdbr0 traffic is affected. Install (tests/lxd/setup-host.sh prints this when needed):
+#   sudo install -m 644 tests/lxd/lxdbr0-forward.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now lxdbr0-forward.service
+# Remove: sudo systemctl disable --now lxdbr0-forward.service, delete the file, reboot.
+[Unit]
+Description=Let LXD containers (lxdbr0) through Docker's FORWARD DROP policy
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -C DOCKER-USER -i lxdbr0 -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -i lxdbr0 -j ACCEPT; iptables -C DOCKER-USER -o lxdbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER -o lxdbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT'
+
+[Install]
+WantedBy=multi-user.target

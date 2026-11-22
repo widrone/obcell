@@ -21,15 +21,21 @@ git clone https://github.com/widrone/obcell && cd obcell
 tests/lxd/setup-host.sh          # installs + initialises LXD, checks resources, ./bootstrap.sh
 ```
 
-If the machine also runs Docker, setup-host.sh warns about Docker's `FORWARD DROP` policy
-(it cuts LXD containers off from the internet) and prints the two iptables rules that fix it.
+If the machine also runs Docker, Docker's `FORWARD DROP` policy cuts LXD containers off from
+the internet. setup-host.sh checks for it and, if lxdbr0 isn't let through yet, prints how to
+install [`tests/lxd/lxdbr0-forward.service`](../tests/lxd/lxdbr0-forward.service): a small
+unit that adds two `DOCKER-USER` rules for lxdbr0 now and at every boot. Docker's own
+containers are not affected.
+
+setup-host.sh also says how many releases fit side by side (about 4 CPUs, 10 GiB RAM and
+25 GiB disk each), so you know whether `--parallel` is safe on this machine.
 
 ## Running the matrix
 
 ```bash
 tests/matrix.sh                      # 22.04, 24.04, 26.04 one after another
 tests/matrix.sh 24.04                # one release
-tests/matrix.sh --parallel           # all at once (needs ~4 CPUs + 8 GiB per release)
+tests/matrix.sh --parallel           # all at once (needs ~4 CPUs, 8 GiB RAM, 25 GiB disk per release)
 tests/matrix.sh --fresh 26.04        # delete the container first: a true from-scratch install
 tests/matrix.sh --only radio 24.04   # just one phase on an already-built container
 tests/matrix.sh --help
