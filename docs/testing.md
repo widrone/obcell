@@ -104,6 +104,26 @@ the avahi line commented out again, and `~/obcell-backups`. A second `reset.yml`
 runs clean. snapd fails in these containers after any reboot, reset or not, because the test
 container hides AppArmor (see below).
 
+## Upgrade test
+
+`tests/lxd/upgrade-smoke.sh` tests [upgrades.md](upgrades.md) in the 22.04 container (the only
+release with MongoDB 6.0 and 7.0 packages). It needs a container installed with the old
+versions: build it from a commit before the upgrade work (`edfae77`), or put an installed one
+back with `reset-old`.
+
+```bash
+tests/lxd/upgrade-smoke.sh 22.04 seed          # 5 more subscribers with random keys; saves the reference dump
+tests/lxd/upgrade-smoke.sh 22.04 route-a 24    # upgrade.yml in place, site.yml (Node 24), verify.yml
+tests/lxd/upgrade-smoke.sh 22.04 reset-old     # back to MongoDB 6.0 + Node 20 with the reference data
+tests/lxd/upgrade-smoke.sh 22.04 route-b 24    # backup, wipe, fresh MongoDB, mongorestore --drop, site.yml
+tests/lxd/upgrade-smoke.sh 22.04 webui 26      # only move Node.js (WebUI rebuild)
+```
+
+Each run ends with `STATE` lines: package versions, FCV, apt repositories, a fingerprint of
+the whole `open5gs` database (`accounts=1 subscribers=6 sha256=…`) and a WebUI login that
+lists the subscribers through the WebUI's API. The fingerprint must match the one `seed`
+printed. `OBCELL_TEST_MONGODB=7.0` stops route a at 7.0.
+
 ## What the test containers need (and why)
 
 The containers are unprivileged with nesting. Docker 29 inside LXD needs these, and

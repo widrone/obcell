@@ -16,6 +16,8 @@ Open work, one file per task, written so that a person or an agent can pick it u
 | 010 | [Optional: encrypt secrets with ansible-vault](010-secrets-vault.md) | anywhere | **yes** (key handling) | – |
 | 011 | [OwnTracks location tracking](011-owntracks.md) | test machine, reference Obcell | **yes** (apply, real phones) | – |
 | 012 | [OwnTracks from the open internet (Funnel), deferred](012-owntracks-funnel.md) | reference Obcell | **yes** (tailnet policy; deferred by the owner) | 011 |
+| 013 | [Upgrade MongoDB and Node.js on the reference Obcell](013-reference-eol-upgrade.md) | reference Obcell | **yes** (its subscriber database) | 009 |
+| 014 | [Run the Open5GS WebUI on Node.js 26](014-webui-node26.md) | test machine | no | 009 |
 
 ## Format
 

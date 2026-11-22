@@ -21,8 +21,8 @@ The list the playbook accepts is `obcell_supported_releases` in `group_vars/all/
 | Repo | jammy | noble | resolute | Notes |
 |---|---|---|---|---|
 | Open5GS PPA (`open5gs/latest`) | 2.8.0 | 2.8.0 | 2.8.0 | |
-| MongoDB server | 6.0 / 7.0 / 8.0 | 8.0, 8.2 | **none yet** (only client tools) | resolute uses the noble 8.0 repo: 8.0.38 installs and runs there (needs AVX on x86) |
-| NodeSource Node 20 | ✓ | ✓ | ✓ | one repo for all releases |
+| MongoDB server | 6.0 / 7.0 / 8.0 | 8.0, 8.2 | **none yet** (only client tools) | Obcells install 8.0 everywhere; resolute uses the noble 8.0 repo: 8.0.38 installs and runs there (needs AVX on x86). 6.0 and 7.0 only matter for upgrading old 22.04 boxes ([upgrades.md](upgrades.md)) |
+| NodeSource Node 24 | ✓ | ✓ | ✓ | one repo for all releases |
 | Tailscale | ✓ | ✓ | ✓ | |
 | MyriadRF PPA (LimeSuite) | ✓ | – | – | not needed on 24.04+: the Ubuntu archive has LimeSuite 23.11 |
 | Ettus PPA (UHD) | ✓ | ✓ | ✓ | not used; the Ubuntu archive is enough |
@@ -61,14 +61,15 @@ database is encrypted with the old key.
 
 - **No `apt-key` on 26.04** (apt 3): `apt_repository` can't fetch a PPA's key there, so
   `roles/common/tasks/ppa.yml` uses `add-apt-repository` when `apt-key` is missing.
-- **Ubuntu's `nodejs` outranks NodeSource's on 26.04** (22.x vs 20.x) and has no npm:
+- **Ubuntu's `nodejs` can outrank NodeSource's on 26.04** (it was 22.x vs 20.x) and has no npm:
   `/etc/apt/preferences.d/nodesource` pins NodeSource's.
 
 ## Known gaps to watch
 
-- MongoDB 6.0 (what 22.04 Obcells run) has been end of life since mid-2025. Moving an Obcell to
-  8.0 means going through 7.0 ([task 009](tasks/009-eol-upgrades.md)).
-- Node 20 has been end of life since April 2026; it is only used to build the WebUI.
+- 22.04 Obcells built before 2026-11 run MongoDB 6.0 (end of life since mid-2025) and Node 20
+  (end of life since April 2026). [upgrades.md](upgrades.md) moves them to 8.0 and 24.
+- Node 24 is supported until 2028-04-30. The WebUI doesn't run on Node 26 yet
+  ([task 014](tasks/014-webui-node26.md)).
 - The `obcell slides` renderer uses the `playwright/python:…-jammy` image. That is a container,
   so it doesn't depend on the host release.
 

@@ -109,6 +109,19 @@ obcell backup          # subscribers, productions, configs and the CA -> ~/obcel
   This brings back the SIM subscribers, the Open Live productions and the Caddy root CA,
   so phones and laptops keep trusting the Obcell.
 
+## Upgrading an older Obcell
+
+Obcells built on 22.04 before 2026-11 run MongoDB 6.0 and Node.js 20, both past end of life.
+`site.yml` moves Node.js by itself, but MongoDB holds the SIM subscribers, so a separate
+playbook moves it (6.0 → 7.0 → 8.0, with a backup first, cell off air):
+
+```bash
+ansible-playbook upgrade.yml --limit <host> --check    # the plan
+ansible-playbook upgrade.yml --limit <host>             # then site.yml and verify.yml
+```
+
+Details and rollback: [docs/upgrades.md](docs/upgrades.md).
+
 ## Back to a clean state
 
 `reset.yml` undoes everything the build did: it stops the cell, takes an `obcell backup`, then
@@ -161,13 +174,14 @@ site.yml              builds an Obcell (all roles, in order)
 reset.yml             takes an Obcell back to a clean Ubuntu (asks for proof first)
 verify.yml            read-only health check
 restore.yml           puts data back from an `obcell backup` archive
+upgrade.yml           moves an older Obcell's MongoDB up, one major at a time (docs/upgrades.md)
 inventory/            your Obcells (git-ignored, written by install.sh) + host_vars/example
 group_vars/all/       defaults for every Obcell: main.yml, SDR profiles, web names, secrets
 roles/                one role per part: base, docker, tailscale, open5gs, sdr, ocudu, srsue,
                       obcell_cli, openlive, intercom, owntracks, monitoring, cell_control (+ common helpers)
 filter_plugins/       small Jinja helpers (CPU lists, URLs)
 tests/                test matrix, LXD harness, unit tests
-docs/                 configuration, testing, Ubuntu releases, tasks
+docs/                 configuration, testing, upgrades, Ubuntu releases, tasks
 ```
 
 ## Licence

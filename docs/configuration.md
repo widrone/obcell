@@ -75,13 +75,14 @@ profiles are seeded on a fresh install.
   intercom-manager `5faf97e`, intercom-frontend `1009edc`, srsRAN_4G `release_23_11`.
 - **Packages:**
   - Open5GS 2.8.0 from `ppa:open5gs/latest`.
-  - Node 20 (NodeSource), used to build the Open5GS WebUI.
-  - MongoDB, per Ubuntu release: 6.0 on 22.04, 8.0 on 24.04 and later (the 24.04 build on
-    26.04, see [ubuntu-releases.md](ubuntu-releases.md)).
+  - Node 24 (NodeSource, `nodejs_major`), which builds and runs the Open5GS WebUI.
+  - MongoDB 8.0 (`mongodb_version`) on every release (the 24.04 build on 26.04, see
+    [ubuntu-releases.md](ubuntu-releases.md)).
   - LimeSuite 23.11: from `ppa:myriadrf/drivers` on 22.04, from the Ubuntu archive on 24.04+.
 
 To upgrade something, change the pin and run the playbook. Patches are re-applied, and
-changed sources trigger a rebuild.
+changed sources trigger a rebuild. The exception is MongoDB: a box keeps its series until
+`upgrade.yml` moves the data ([upgrades.md](upgrades.md)).
 
 ## Tags
 
