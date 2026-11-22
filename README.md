@@ -12,6 +12,7 @@ What a finished Obcell gives you:
 | Remote production | Open Live Studio (vision mixer, guests over WHIP), Open Intercom, and radio-into-intercom |
 | A portal | Homepage with status tiles and on-air buttons, all behind one login (Caddy + Authelia) |
 | Monitoring | Grafana dashboards, Prometheus alerts, ntopng traffic, an OpenWebRX spectrum view |
+| Crew locations | OwnTracks: phones report where they are, from anywhere; set up with one QR scan, live map behind the login |
 | A runbook | the `obcell` command on the box (`obcell status`, `obcell backup`, `obcell onair`, …) |
 
 Everything is built with ordinary open-source tools: Ansible, Docker Compose, systemd, apt
@@ -163,7 +164,7 @@ restore.yml           puts data back from an `obcell backup` archive
 inventory/            your Obcells (git-ignored, written by install.sh) + host_vars/example
 group_vars/all/       defaults for every Obcell: main.yml, SDR profiles, web names, secrets
 roles/                one role per part: base, docker, tailscale, open5gs, sdr, ocudu, srsue,
-                      obcell_cli, openlive, intercom, monitoring, cell_control (+ common helpers)
+                      obcell_cli, openlive, intercom, owntracks, monitoring, cell_control (+ common helpers)
 filter_plugins/       small Jinja helpers (CPU lists, URLs)
 tests/                test matrix, LXD harness, unit tests
 docs/                 configuration, testing, Ubuntu releases, tasks

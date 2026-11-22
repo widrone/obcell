@@ -14,6 +14,7 @@ Open work, one file per task, written so that a person or an agent can pick it u
 | 008 | [Reboot test on the reference Obcell](008-reference-reboot.md) | reference Obcell | **yes** | 007 |
 | 009 | [Plan the MongoDB 6.0 and Node 20 upgrades](009-eol-upgrades.md) | test machine | to approve on an Obcell | 003 |
 | 010 | [Optional: encrypt secrets with ansible-vault](010-secrets-vault.md) | anywhere | **yes** (key handling) | – |
+| 011 | [OwnTracks location tracking, public through Funnel](011-owntracks.md) | test machine, reference Obcell | **yes** (tailnet policy, apply, a phone) | – |
 
 ## Format
 

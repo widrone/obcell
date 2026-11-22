@@ -36,6 +36,9 @@ probes, the gNB YAML, the systemd units, the CPU fences and the dashboards.
 | `rtlsdr_enabled` | RTL-SDR for OpenWebRX (driver blacklist, receiver profiles) | on |
 | `usb2_roothub_no_autosuspend` | xHCI quirk (the reference NUC) | off |
 | `openlive_enabled`, `intercom_enabled`, `monitoring_enabled` | skip whole stacks | on |
+| `owntracks_enabled` | OwnTracks Recorder (where the crew's phones are), with a phone setup page | on |
+| `owntracks_funnel` | also put the post URL, and only that, on the public internet through Tailscale Funnel | off |
+| `owntracks_app_server` | the address in the setup QR code | the Funnel address, else the tailnet name, else the LAN IP |
 | `docker_daemon_config`, `docker_extra_packages` | `/etc/docker/daemon.json` content (e.g. `storage-driver: fuse-overlayfs` inside LXD) | none written |
 | `obcell_readme_*`, `obcell_cpu_note`, `obcell_hardware_desc` | wording for the runbook on the box | generic text |
 
@@ -52,6 +55,7 @@ the box has a GPU.
   the Strom admin hash (bcrypt). Later runs reuse the same files, so nothing rotates.
 - **SIMs:** `secrets/<host>/subscribers.yml` holds an `open5gs_subscribers:` list (imsi, k,
   opc, optional imei). They are inserted only if missing; after that the WebUI owns them.
+- **OwnTracks post token:** `owntracks_pub_token`, the secret end of the URL the apps post to.
 - **RTMPS feeds:** `secrets/<host>/rtmps_feeds.conf` holds the stream keys; without it,
   placeholders are written.
 - **Moving an Obcell:** copy the folder to the new control machine yourself (never through git).
@@ -61,7 +65,7 @@ the box has a GPU.
 
 `obcell backup` on the box writes `~/obcell-backups/obcell-config-<time>.tar.gz`. `restore.yml` puts
 back the Open5GS subscribers (mongorestore), the Open Live productions (CouchDB) and Caddy's
-root CA. The Intercom production *Crew* (lines Talkback + Radio) and the OpenWebRX receiver
+root CA, and the OwnTracks location history (it replaces what the new box recorded). The Intercom production *Crew* (lines Talkback + Radio) and the OpenWebRX receiver
 profiles are seeded on a fresh install.
 
 ## Pinned versions
@@ -83,7 +87,7 @@ changed sources trigger a rebuild.
 
 | Tag | Runs |
 |---|---|
-| `base docker tailscale open5gs sdr ocudu srsue Obcell openlive intercom monitoring control` | that role |
+| `base docker tailscale open5gs sdr ocudu srsue Obcell openlive intercom owntracks monitoring control` | that role |
 | `core`, `ran`, `web` | groups of roles |
 | `frontdoor` | only the Caddy sites, Homepage links, runbook table and WebUI listen address |
 | `homepage` | only the Homepage link-rewrite script |
@@ -96,3 +100,59 @@ Read-only fact tasks that templates need are tagged `always`, so any tag-limited
 - Files that contain `{{ }}` themselves use `[= =]`, `[% %]` and `[# #]`: the `obcell` CLI,
   `control.py`, `radio_bridge.py` and the Prometheus alert rules (Docker `--format`,
   Prometheus `{{ $value }}`, Python f-strings).
+
+## OwnTracks (where the crew is)
+
+The [OwnTracks](https://owntracks.org) app on each phone reports its position to the
+[Recorder](https://github.com/owntracks/recorder) in `~/owntracks`. The map, the table and
+the API are at `https://<name>:2443/` behind the operator login (Homepage tile *OwnTracks*).
+
+**HTTP, not MQTT.** The app's HTTP mode posts each position over HTTPS. That goes through
+Caddy like every other service, and through Tailscale Funnel when it has to be public, with
+no MQTT broker to run. The trade-off: the app can't receive commands from the server, and it
+only hears about the other phones when it posts itself.
+
+**Adding a phone: one scan, no account.**
+- **The setup page** is `https://<name>:2443/join/`, or `http://<LAN IP>/join/` on the LAN and
+  the cell (plain HTTP, so there's no certificate warning). It needs no login; the Homepage
+  tile *Add a phone to OwnTracks* links to it, so put it on a screen.
+- **What the QR code holds:** an `owntracks:///config?inline=` link with only HTTP mode and the
+  post URL, so one code fits every phone. People then set their own username, device ID and
+  tracker ID in the app; until they do, the phone shows up as `owntracks/phone`.
+- **Fallbacks:** on the phone itself, the page's *Set up OwnTracks* button does the same as the
+  scan. For Android cameras that only open web links, a second code opens the page on the phone.
+- **In a terminal:** `obcell owntracks` prints the same code.
+
+**No logins, but a secret URL.** The post URL ends in a random token
+(`secrets/<host>/owntracks_pub_token`). Caddy passes `/pub/<token>` to the Recorder and sends
+everything else on that port to the operator login. The app sends its username and device ID
+itself, so anyone with the URL can post under any name. To change the token, delete the file,
+run the playbook, and scan the new code on every phone.
+
+**Where the setup is visible:** the page holds the URL, and anyone on the LAN, the tailnet or
+the cell can open it. It's never on Funnel.
+
+**Which URL the code holds** (`owntracks_app_server`):
+
+| Setting | URL in the app | Works for phones |
+|---|---|---|
+| `owntracks_funnel: true` | `https://<tailnet name>:10000/pub/<token>` | anywhere with internet, Let's Encrypt certificate |
+| a tailnet, no Funnel | `https://<tailnet name>:2443/pub/<token>` | with the Tailscale app |
+| neither | `https://<LAN IP>:2443/pub/<token>` | on the LAN or the cell, trusting Caddy's CA |
+
+The Funnel URL also works from the LAN and the cell, through the box's internet uplink, so a
+phone that moves around keeps one URL. Without an uplink, the app queues positions and sends
+them later.
+
+**Turning Funnel on:**
+1. In the Tailscale admin console, under *Access controls*, allow Funnel for the Obcell's node:
+   `"nodeAttrs": [{"target": ["<the node or its tag>"], "attr": ["funnel"]}]`. HTTPS
+   certificates must be on for the tailnet; they already are when the tailnet names work.
+2. Set `owntracks_funnel: true` in the host vars and run `site.yml --tags owntracks,frontdoor,cli`.
+   If the policy doesn't allow Funnel yet, the role stops and points to step 1.
+3. Phones set up before this hold the old URL: scan the new code.
+4. Test from a phone that is off Wi-Fi and the tailnet: `https://<tailnet name>:10000/` gives
+   404, and only the post URL gets through.
+
+Funnel uses port 10000 because it only offers 443, 8443 and 10000, and Caddy already serves 443
+and 8443 on the tailnet name.
