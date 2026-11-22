@@ -86,7 +86,7 @@
       loop:
         - {url: "https://{{ obcell_lan_ip }}:{{ owntracks_https_port }}/", method: GET, status: [302, 401]}
         - {url: "https://{{ obcell_lan_ip }}:{{ owntracks_https_port }}/api/0/last", method: GET, status: [302, 401]}
-        - {url: "https://{{ obcell_lan_ip }}:{{ owntracks_https_port }}/pub", method: POST, status: [302, 401]}
+        - {url: "https://{{ obcell_lan_ip }}:{{ owntracks_https_port }}/pub", method: POST, status: [302, 303, 401]}
         - {url: "https://{{ obcell_lan_ip }}:{{ owntracks_https_port }}/join/", method: GET, status: [200]}
         - {url: "http://{{ obcell_lan_ip }}/join/", method: GET, status: [200]}
       loop_control:
