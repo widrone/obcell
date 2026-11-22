@@ -126,6 +126,9 @@ case $CMD in
     purge_nodejs
     play site.yml --tags open5gs -e mongodb_version=6.0 -e nodejs_major=20
     restore_dump "$W/reference.archive.gz"
+    # The AMF keeps phone contexts from earlier radio tests; when one times out, the core
+    # writes imeisv/sqn into that SIM's record and the fingerprint moves. Start clean.
+    cx 'systemctl restart open5gs-amfd'
     echo "TIME reset-old $(( $(date +%s) - t0 ))"
     state ;;
   webui)
