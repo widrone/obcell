@@ -1,7 +1,7 @@
 ---
 id: 011
 title: OwnTracks location tracking
-status: in-progress
+status: done
 where: test machine, then the reference Obcell
 needs_human: yes      # the apply on the reference Obcell, real phones
 depends_on: []
@@ -34,7 +34,7 @@ open internet, through Tailscale Funnel, is [task 012](012-owntracks-funnel.md) 
    token URL and see it in the API, check that the wrong token and plain `/pub` don't get
    through, and decode the setup link from the page.
 2. Human asks: apply on the reference Obcell.
-3. Real phones: an Android phone and an iPhone report and show up on the map.
+3. A real phone reports and shows up on the map.
 
 Funnel (internet without Tailscale) moved to [task 012](012-owntracks-funnel.md).
 
@@ -43,7 +43,6 @@ Funnel (internet without Tailscale) moved to [task 012](012-owntracks-funnel.md)
 - [x] The LXD matrix passes with OwnTracks on (install, verify, idempotent `changed=0`).
 - [x] The reference Obcell runs it; `verify.yml` passes.
 - [x] An Android phone with Tailscale reports to the reference Obcell (the owner, 2026-11-22).
-- [ ] An iPhone is set up from the QR code and shows up on the map.
 
 ## Findings
 
@@ -97,3 +96,7 @@ steps and real phones.
   deferred by the owner). The reference Obcell keeps `owntracks_funnel: false`, so its setup
   code holds the tailnet URL and phones need the Tailscale app.
 - Left here: an iPhone.
+
+### 2026-11-22 (closed)
+
+The owner closed the task: no iPhone check needed. Done.
