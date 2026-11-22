@@ -51,9 +51,10 @@ fingerprint() {
 # Log in to the WebUI like a browser (CSRF token, session cookie), then list the
 # subscribers through its own API (mongoose -> MongoDB).
 webui_login() {
-  cx 'set -e; j=$(mktemp); u=http://127.0.0.1:9999
+  cx 'j=$(mktemp); u=http://127.0.0.1:9999
     for _ in $(seq 30); do curl -sf -o /dev/null $u/api/auth/csrf && break; sleep 2; done
-    t=$(curl -s -c $j -b $j $u/api/auth/csrf | python3 -c "import json,sys; print(json.load(sys.stdin)[\"csrfToken\"])")
+    t=$(curl -s -c $j -b $j $u/api/auth/csrf | python3 -c "import json,sys; print(json.load(sys.stdin)[\"csrfToken\"])" 2>/dev/null) \
+      || { echo "login=FAIL webui_not_answering"; rm -f $j; exit 0; }
     code=$(curl -s -o /dev/null -w "%{http_code}" -c $j -b $j -H "X-CSRF-Token: $t" -H "Content-Type: application/json" \
            --data "{\"username\":\"admin\",\"password\":\"1423\"}" $u/api/auth/login)
     jwt=$(curl -s -c $j -b $j $u/api/auth/session | python3 -c "import json,sys; print(json.load(sys.stdin).get(\"authToken\", \"\"))")
