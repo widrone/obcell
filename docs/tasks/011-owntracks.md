@@ -1,16 +1,17 @@
 ---
 id: 011
-title: OwnTracks location tracking, public through Tailscale Funnel
+title: OwnTracks location tracking
 status: in-progress
 where: test machine, then the reference Obcell
-needs_human: yes      # the tailnet policy (Funnel), the apply on the reference Obcell, a real phone
+needs_human: yes      # the apply on the reference Obcell, real phones
 depends_on: []
 ---
 
 ## Goal
 
 The crew's phones run the OwnTracks app and report where they are to the Obcell, from the
-internet, the tailnet, the LAN and the Obcell's own cell. The map is behind the operator login.
+tailnet, the LAN and the Obcell's own cell. The map is behind the operator login. From the
+open internet, through Tailscale Funnel, is [task 012](012-owntracks-funnel.md) (deferred).
 
 ## Context
 
@@ -32,18 +33,17 @@ internet, the tailnet, the LAN and the Obcell's own cell. The map is behind the 
 1. LXD test on the test machine: install, verify, idempotent re-run. Post a position to the
    token URL and see it in the API, check that the wrong token and plain `/pub` don't get
    through, and decode the setup link from the page.
-2. Human: allow Funnel for the reference Obcell's node in the tailnet policy (`nodeAttrs`,
-   `"attr": ["funnel"]`).
-3. Human asks: apply on the reference Obcell (`owntracks_funnel: true` in its host vars).
-4. A real iPhone and Android phone: scan the setup code (camera), then from mobile data the
-   phones show on the map.
+2. Human asks: apply on the reference Obcell.
+3. Real phones: an Android phone and an iPhone report and show up on the map.
+
+Funnel (internet without Tailscale) moved to [task 012](012-owntracks-funnel.md).
 
 ## Done when
 
 - [x] The LXD matrix passes with OwnTracks on (install, verify, idempotent `changed=0`).
-- [ ] The reference Obcell runs it; `verify.yml` passes, including the Funnel check.
-- [ ] An iPhone and an Android phone are set up from the QR code and show up on the map from
-      mobile data. From outside the tailnet, `https://<tailnet name>:10000/` gives 404.
+- [x] The reference Obcell runs it; `verify.yml` passes.
+- [x] An Android phone with Tailscale reports to the reference Obcell (the owner, 2026-11-22).
+- [ ] An iPhone is set up from the QR code and shows up on the map.
 
 ## Findings
 
@@ -88,3 +88,12 @@ can't print it (900d6e0).
 (f3a29ed. 26.04 reused its container; 24.04 was fresh.) The OwnTracks end-to-end check
 passes 18/18 in both containers. `qrencode` installs from the archive on both. Left: the Funnel
 steps and real phones.
+
+### 2026-11-22 (phones, Funnel)
+
+- The owner tested an Android phone, and other machines, with Tailscale against the reference
+  Obcell: the stack works.
+- Funnel is not needed for the reference Obcell for now. It moved to task 012 (`blocked`:
+  deferred by the owner). The reference Obcell keeps `owntracks_funnel: false`, so its setup
+  code holds the tailnet URL and phones need the Tailscale app.
+- Left here: an iPhone.
