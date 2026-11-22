@@ -1,7 +1,7 @@
 ---
 id: 009
 title: Plan the MongoDB 6.0 and Node 20 upgrades
-status: in-progress
+status: done
 where: test machine
 needs_human: yes      # approve before touching a real Obcell's database
 depends_on: [003]
@@ -36,8 +36,8 @@ without losing data. Doing it on the reference Obcell is a separate, human-appro
 
 ## Done when
 
-- [ ] One route is documented and tested twice in a container, with no subscriber loss.
-- [ ] There's a Node version recommendation, with the build result.
+- [x] One route is documented and tested twice in a container, with no subscriber loss.
+- [x] There's a Node version recommendation, with the build result.
 
 ## Findings
 
@@ -108,4 +108,18 @@ the subscribers through the WebUI's own API.
   `site.yml --check --diff` shows `changed=4`, all the Node.js/WebUI move. Its WebUI has the
   `.env` with both secrets (mode 644, as the WebUI creates it). Applying it is
   [task 013](013-reference-eol-upgrade.md).
+
+### 2026-11-22: full matrix with the new defaults (d648aaa)
+
+| Release | ansible-core | Install | Health | Idempotent | NG Setup | UE end-to-end | Minutes |
+|---|---|---|---|---|---|---|---|
+| 24.04 (obcell-noble), existing container on Node 20 | 2.20.11 (inside) | PASS | PASS | PASS | PASS | PASS | 15 |
+| 22.04 (obcell-jammy), fresh | 2.17.14 (inside) | PASS | PASS | PASS | PASS | PASS | 39 |
+| 26.04 (obcell-resolute), fresh | 2.20.11 (inside) | PASS | PASS | PASS | PASS | PASS | 41 |
+
+- 24.04: site.yml moved the existing box from Node.js 20 to 24 and rebuilt the WebUI
+  (the other changed tasks were the container catching up on commits since it was built).
+- 22.04 fresh: MongoDB 8.0 repo and Node.js 24 straight away, no "upgrade pending" note.
+- noble and resolute now run MongoDB 8.0.38 and Node.js 24.22.3. The 22.04 container was
+  deleted afterwards for disk, so the test machine is back to noble + resolute.
 
