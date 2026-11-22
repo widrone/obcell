@@ -259,7 +259,8 @@ cmd_owntracks() {
   local uri
   uri=$(cat "$HOME/owntracks/app-config.uri" 2>/dev/null) || die "no ~/owntracks/app-config.uri (run the playbook with --tags owntracks)"
   echo "$(bold 'Add a phone to OwnTracks'): install the app, then scan this with the phone's camera."
-  qrencode -t ANSIUTF8 -m 2 "$uri" || die "qrencode missing (sudo apt install qrencode)"
+  command -v qrencode >/dev/null || die "qrencode missing (sudo apt install qrencode)"
+  qrencode -t ANSIUTF8 -m 2 "$uri"
   echo "Setup page (no login): [= owntracks_join_urls | join(' · ') =]"
   echo "Then set username, device ID and tracker ID in the app. Map: https://$TS_NAME:[= owntracks_https_port =]/"
 }
