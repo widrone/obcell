@@ -1,0 +1,57 @@
+# One MongoDB upgrade step, mongodb_series -> mongodb_next: make sure the feature
+# compatibility version (FCV) is mongodb_series, install the mongodb_next packages,
+# restart mongod, raise the FCV to mongodb_next. From 7.0 on, setting the FCV needs confirm: true.
+- name: MongoDB {{ mongodb_series }} -> {{ mongodb_next }}, FCV now
+  ansible.builtin.command:
+    argv: [mongosh, --quiet, --eval,
+           "db.adminCommand({getParameter: 1, featureCompatibilityVersion: 1}).featureCompatibilityVersion.version"]
+  environment: {HOME: /root}
+  register: fcv_before
+  changed_when: false
+
+- name: MongoDB {{ mongodb_series }}, FCV set to {{ mongodb_series }} first
+  ansible.builtin.command:
+    argv: [mongosh, --quiet, --eval, "{{ lookup('ansible.builtin.template', 'set_fcv.js.j2', template_vars={'fcv': mongodb_series}) }}"]
+  environment: {HOME: /root}
+  when: fcv_before.stdout != mongodb_series
+  changed_when: true
+
+- name: MongoDB {{ mongodb_next }} repository
+  ansible.builtin.include_tasks: mongodb_repo.yml
+  vars:
+    mongodb_series: "{{ mongodb_next }}"
+
+# mongodb-org depends on its parts without versions, so every part is named.
+- name: MongoDB {{ mongodb_next }} packages
+  ansible.builtin.apt:
+    name: "{{ mongodb_packages | map('regex_replace', '$', '=' ~ mongodb_next ~ '.*') | list }}"
+    update_cache: true
+    dpkg_options: force-confdef,force-confold
+  environment:
+    DEBIAN_FRONTEND: noninteractive
+
+- name: Restart mongod on {{ mongodb_next }}
+  ansible.builtin.systemd:
+    name: mongod
+    state: restarted
+    daemon_reload: true
+
+- name: MongoDB {{ mongodb_next }} answers
+  ansible.builtin.command:
+    argv: [mongosh, --quiet, --eval, "db.version()"]
+  environment: {HOME: /root}
+  register: mongod_up
+  until: mongod_up.rc == 0 and mongod_up.stdout is match(mongodb_next ~ '\.')
+  retries: 30
+  delay: 2
+  changed_when: false
+
+- name: MongoDB {{ mongodb_next }}, FCV raised to {{ mongodb_next }}
+  ansible.builtin.command:
+    argv: [mongosh, --quiet, --eval, "{{ lookup('ansible.builtin.template', 'set_fcv.js.j2', template_vars={'fcv': mongodb_next}) }}"]
+  environment: {HOME: /root}
+  changed_when: true
+
+- name: Now on {{ mongodb_next }}
+  ansible.builtin.set_fact:
+    mongodb_series: "{{ mongodb_next }}"

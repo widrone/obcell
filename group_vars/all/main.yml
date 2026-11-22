@@ -56,6 +56,11 @@ mongodb_version: "{{ '6.0' if ansible_distribution_release == 'jammy' else '8.0'
 # MongoDB publishes its server per Ubuntu release. For releases it doesn't cover yet
 # (26.04 resolute, Nov 2026: only the client tools), the noble build installs and runs.
 mongodb_repo_release: "{{ ansible_distribution_release if ansible_distribution_release in ['jammy', 'noble'] else 'noble' }}"
+# A box keeps the MongoDB series it has; upgrade.yml steps it up to mongodb_version along this
+# path, one major at a time (docs/upgrades.md). The packages each step moves:
+mongodb_upgrade_path: ["6.0", "7.0", "8.0"]
+mongodb_packages: [mongodb-org, mongodb-org-database, mongodb-org-database-tools-extra, mongodb-org-mongos,
+                   mongodb-org-server, mongodb-org-shell, mongodb-org-tools]
 
 # SIMs to provision (inserted only if the IMSI is not in the database yet; the WebUI owns them after).
 # Keep keys out of git: put the real list in secrets/<host>/subscribers.yml (loaded by the open5gs role).

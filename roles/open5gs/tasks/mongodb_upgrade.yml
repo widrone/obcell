@@ -1,0 +1,76 @@
+# Moves an installed MongoDB up to mongodb_version, one major at a time (MongoDB's only
+# supported path, see docs/upgrades.md). The data stays in place. Used by upgrade.yml.
+- name: MongoDB series
+  ansible.builtin.include_tasks: mongodb_series.yml
+
+- name: MongoDB is installed, and the wanted version is on the upgrade path
+  ansible.builtin.assert:
+    that:
+      - mongodb_installed.stdout is match('installed ')
+      - mongodb_series in mongodb_upgrade_path
+      - mongodb_version in mongodb_upgrade_path
+      - mongodb_upgrade_path.index(mongodb_series) <= mongodb_upgrade_path.index(mongodb_version)
+    fail_msg: >-
+      Can't go from MongoDB {{ mongodb_series }} ({{ mongodb_installed.stdout | default('not installed', true) }})
+      to {{ mongodb_version }} along {{ mongodb_upgrade_path | join(' -> ') }}. Downgrades are a restore
+      from backup instead (docs/upgrades.md).
+    quiet: true
+
+- name: Upgrade steps
+  ansible.builtin.set_fact:
+    mongodb_steps: >-
+      {{ mongodb_upgrade_path[mongodb_upgrade_path.index(mongodb_series) + 1:
+                              mongodb_upgrade_path.index(mongodb_version) + 1] }}
+
+- name: Plan
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'MongoDB is already on ' ~ mongodb_version ~ '; nothing to do.' if not mongodb_steps else
+         'MongoDB ' ~ ([mongodb_series] + mongodb_steps) | join(' -> ') }}
+
+- name: Upgrade
+  when: mongodb_steps | length > 0
+  block:
+    # Restarting mongod briefly takes the subscriber database away from the core.
+    - name: Is the cell on air?
+      ansible.builtin.command: systemctl is-active {{ gnb_unit }}
+      register: upgrade_gnb
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: The cell is off air
+      ansible.builtin.assert:
+        that: upgrade_gnb.stdout != 'active'
+        fail_msg: "The cell is on air. Take it off air first (obcell offair), then run upgrade.yml again."
+        quiet: true
+
+    # --check stops here: the plan and the guard above are the preview.
+    - name: Backup, then the steps
+      when: not ansible_check_mode
+      block:
+        - name: Backup before touching the data (obcell backup)
+          ansible.builtin.command: "{{ obcell_home }}/obcell/obcell backup"
+          become: true
+          become_user: "{{ obcell_user }}"
+          register: upgrade_backup
+          changed_when: true
+          failed_when: upgrade_backup.rc != 0 or 'mongodump failed' in upgrade_backup.stdout
+
+        - name: Backup written
+          ansible.builtin.debug:
+            msg: "{{ upgrade_backup.stdout_lines | select('match', '^(collecting into|done)') | list }}"
+
+        - name: One major at a time
+          ansible.builtin.include_tasks: mongodb_upgrade_step.yml
+          loop: "{{ mongodb_steps }}"
+          loop_control:
+            loop_var: mongodb_next
+
+        # The core's NFs and the WebUI reconnect by themselves; restarting them makes sure
+        # none of them keeps a dead connection to the old mongod.
+        - name: Restart the services that use MongoDB
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop: [open5gs-udrd, open5gs-pcfd, open5gs-hssd, open5gs-pcrfd, open5gs-webui]

@@ -1,0 +1,19 @@
+# Upgrades that move data, which site.yml never does on its own. Today: MongoDB, one major at
+# a time up to mongodb_version (6.0 -> 7.0 -> 8.0), with an `obcell backup` first. The cell
+# must be off air. Afterwards run site.yml, which also moves Node.js and rebuilds the WebUI.
+#
+#   ansible-playbook upgrade.yml --limit <host> --check    # the plan, changes nothing
+#   ansible-playbook upgrade.yml --limit <host>
+#
+# Procedure, timings and rollback: docs/upgrades.md
+- name: Upgrade Obcell data stores
+  hosts: obcell
+  become: true
+  tasks:
+    - name: Right machine?
+      ansible.builtin.import_tasks: tasks/right_host.yml
+
+    - name: MongoDB
+      ansible.builtin.include_role:
+        name: open5gs
+        tasks_from: mongodb_upgrade
