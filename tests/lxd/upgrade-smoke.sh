@@ -107,7 +107,7 @@ case $CMD in
   route-b)
     [ -n "$NODE" ] || die "route-b needs the Node.js major, e.g. 24"
     t0=$(date +%s)
-    ux "~/obcell/obcell backup | tail -2"
+    ux "\$HOME/obcell/obcell backup | tail -2"
     a=$(ux 'ls -1t ~/obcell-backups/obcell-config-*.tar.gz | head -1')
     ux "cd $W && tar -xzf $a ./open5gs-mongo.archive.gz && mv open5gs-mongo.archive.gz route-b.archive.gz"
     wipe_mongodb
