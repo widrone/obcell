@@ -46,3 +46,34 @@ internet, the tailnet, the LAN and the Obcell's own cell. The map is behind the 
       mobile data. From outside the tailnet, `https://<tailnet name>:10000/` gives 404.
 
 ## Findings
+
+### 2026-11-22
+
+Design: first one app login per phone (Caddy basic auth, 5b6d22a). Then, as asked for easy
+onboarding, no logins: a secret token in the post URL and a setup page with a QR code
+(9b7b667). The token moved from the Caddyfile to Caddy's environment, so `--check --diff`
+can't print it (900d6e0).
+
+| Release | ansible-core | Install | Health | Idempotent | NG Setup | UE end-to-end | Minutes |
+|---|---|---|---|---|---|---|---|
+| 22.04 (obcell-jammy) | 2.17.14 (inside) | PASS | PASS | PASS | SKIP | SKIP | 10 |
+
+(900d6e0, existing container, phases install,idempotent.)
+
+- **End to end in the container:** 18/18 checks.
+  - Token URL: 200, and a phone without a username lands as `owntracks/phone`.
+  - Wrong token, plain `/pub` or an empty token: 303, sent to the login.
+  - Map and API: 302. `/join/`: 200 on HTTPS and plain HTTP.
+  - The page's setup link decodes to `{"mode": 3, "url": …, "auth": false}`.
+  - The token is not in the Caddyfile, and the store is 0700.
+- **Funnel listener** (by hand in the container, as rendered with `owntracks_funnel: true`):
+  token post 200, everything else 404, nothing listening on the LAN address.
+- **Reference Obcell:** applied 900d6e0 with `--skip-tags srsue` (changed=18), then 985bc59
+  with `--tags cli` (changed=1).
+  - Re-check: only the srsUE patch file is pending (a rebuild, skipped on purpose).
+  - `verify.yml`: OK.
+  - Live: `/join/` 200 on LAN HTTPS, LAN HTTP and the tailnet name (Let's Encrypt), a
+    `ping/ping` post through the token URL 200, `probe_success{service="owntracks"}` 1.
+- **Funnel not on yet:** the node has no `funnel` capability in the tailnet policy. Until it
+  does, the setup code holds the tailnet URL, so phones need the Tailscale app.
+- **Still to do:** 24.04 and 26.04 with OwnTracks, the Funnel steps, real phones.
