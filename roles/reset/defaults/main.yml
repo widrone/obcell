@@ -46,6 +46,7 @@ reset_system_paths:
   - /etc/modprobe.d/blacklist-rtl-sdr.conf
   - /etc/udev/rules.d/99-usb2-roothub-no-autosuspend.rules
   - /etc/apt/sources.list.d/nodesource.sources
+  - /etc/apt/preferences.d/nodesource
   - /usr/share/keyrings/nodesource.gpg
 reset_docker_paths: [/etc/docker, /var/lib/docker, /var/lib/containerd, /opt/containerd]
 reset_tailscale_paths: [/etc/apt/sources.list.d/tailscale.list, /usr/share/keyrings/tailscale-archive-keyring.gpg, /var/lib/tailscale]

@@ -64,6 +64,17 @@
           Signed-By: /usr/share/keyrings/nodesource.gpg
       register: node_repo
 
+    # Ubuntu's own nodejs can be newer than NodeSource's (26.04 ships 22.x) and then wins,
+    # but it comes without npm, which the WebUI build needs. Prefer NodeSource, as its docs say.
+    - name: Prefer NodeSource's nodejs over Ubuntu's
+      ansible.builtin.copy:
+        dest: /etc/apt/preferences.d/nodesource
+        mode: "0644"
+        content: |
+          Package: nodejs
+          Pin: origin deb.nodesource.com
+          Pin-Priority: 600
+
     - name: Node.js
       ansible.builtin.apt:
         name: nodejs
