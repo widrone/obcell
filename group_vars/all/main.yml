@@ -51,8 +51,9 @@ open5gs_amf_ngap_addr: 127.0.0.5                # package default
 open5gs_webui_enabled: true
 open5gs_webui_port: 9999                        # local only (127.0.0.1); browsers use the front door below
 open5gs_webui_https_port: 9443                  # Caddy + Authelia in front of the WebUI
-nodejs_major: 20
-mongodb_version: "{{ '6.0' if ansible_distribution_release == 'jammy' else '8.0' }}"
+nodejs_major: 24                                # NodeSource; runs the WebUI (26 crashes it, docs/upgrades.md)
+# New boxes get this; a box that has an older series keeps it until upgrade.yml (docs/upgrades.md).
+mongodb_version: "8.0"
 # MongoDB publishes its server per Ubuntu release. For releases it doesn't cover yet
 # (26.04 resolute, Nov 2026: only the client tools), the noble build installs and runs.
 mongodb_repo_release: "{{ ansible_distribution_release if ansible_distribution_release in ['jammy', 'noble'] else 'noble' }}"
