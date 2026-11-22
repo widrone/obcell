@@ -16,7 +16,9 @@ H=/home/ubuntu
 GW=${OBCELL_TEST_UE_GATEWAY:-10.45.0.1}       # ue_pool_v4_gateway
 cx() { lxc exec "$C" -- bash -c "$1"; }   # run in the container
 
-lxc info "$C" 2>/dev/null | grep -q 'Status: RUNNING' || die "container $C is not running"
+# No `lxc info | grep -q` here: with pipefail, grep -q exiting early makes lxc info die of
+# SIGPIPE (exit 141) on its long output, and a running container looks stopped.
+[ "$(lxc list "^$C\$" --format csv -c s 2>/dev/null)" = RUNNING ] || die "container $C is not running"
 # Safety: only ever start a gNB whose radio is the ZeroMQ driver, inside an LXD container.
 for cfg in gnb_n40.yml gnb_zmq.yml; do
   if cx "test -f $H/$cfg"; then

@@ -105,6 +105,9 @@ ansible-playbook site.yml --limit <host> --check --diff   # on the Obcell itself
 - **Docker in LXD:** see "What the test containers need" in `docs/testing.md`.
 - **`pkill -f pattern` inside `bash -c "…"`** also matches that shell's own command line.
   Use `pkill -f "[a]pps/gnb/gnb"`.
+- **`cmd | grep -q` under `set -o pipefail`** fails at random (exit 141) when `cmd` writes
+  more after grep has exited, e.g. `lxc info`. Ask for the value directly
+  (`lxc list "^name$" --format csv -c s`) or use `grep … >/dev/null`.
 - **`ansible_connection: local`** changes the machine it runs on. The "Right machine?"
   guard (`tasks/right_host.yml`) stops a run on the wrong box. Don't weaken it.
 
