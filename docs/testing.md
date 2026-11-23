@@ -117,13 +117,19 @@ tests/lxd/upgrade-smoke.sh 22.04 route-a 26    # upgrade.yml in place, site.yml 
 tests/lxd/upgrade-smoke.sh 22.04 reset-old     # back to MongoDB 6.0 + Node 20 with the reference data
 tests/lxd/upgrade-smoke.sh 22.04 route-b 26    # backup, wipe, fresh MongoDB, mongorestore --drop, site.yml
 tests/lxd/upgrade-smoke.sh 22.04 webui 26      # only move Node.js (WebUI rebuild)
+tests/lxd/upgrade-smoke.sh 22.04 roles         # WebUI account roles, from a user-role account
 ```
 
 Each run ends with `STATE` lines: package versions, FCV, apt repositories, a fingerprint of
-the whole `open5gs` database (`accounts=1 subscribers=6 sha256=…`), the WebUI's `jwa`
-version, and a WebUI login that
-lists the subscribers through the WebUI's API. The fingerprint must match the one `seed`
-printed. `OBCELL_TEST_MONGODB=7.0` stops route a at 7.0.
+the whole `open5gs` database (`accounts=1 subscribers=6 sha256=…`), the WebUI's `.env` mode
+and `jwa` version, and a WebUI login that lists the subscribers through the WebUI's API. The
+fingerprint must match the one `seed` printed. `OBCELL_TEST_MONGODB=7.0` stops route a at 7.0.
+
+`roles` (`tests/lxd/webui-roles.py`) adds a throw-away `user`-role account, logs in as it, and
+tries what only an admin may do: create an admin account, read password hashes, give itself the
+admin role, and use its token after the account is deleted. It also checks that the user can
+still change its own password and that the admin can still create, list and delete accounts.
+Every `RESULT` line shows the expected value in brackets; the accounts it made are removed.
 
 ## What the test containers need (and why)
 

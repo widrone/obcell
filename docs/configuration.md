@@ -72,7 +72,9 @@ profiles are seeded on a fresh install.
 
 - **Container images:** by digest in the compose templates.
 - **Sources:** OCUDU `077b0808ab`, Open Live and Studio `v0.8.0` (+ local patches),
-  intercom-manager `5faf97e`, intercom-frontend `1009edc`, srsRAN_4G `release_23_11`.
+  intercom-manager `5faf97e`, intercom-frontend `1009edc`, srsRAN_4G `release_23_11`, the
+  Open5GS WebUI `v2.8.0` with three later upstream fixes (`open5gs_webui_patches`: account
+  roles checked on the server, `.env` readable by its owner only).
 - **Packages:**
   - Open5GS 2.8.0 from `ppa:open5gs/latest`.
   - Node 26 (NodeSource, `nodejs_major`), which builds and runs the Open5GS WebUI, with

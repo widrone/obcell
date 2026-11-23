@@ -22,8 +22,9 @@ Open5GS release locks `jwa` 1.4.2 or newer. Node.js 24 also runs the build witho
 - **Node.js has no data**, so `site.yml` moves a box to `nodejs_major` by itself. It switches
   the NodeSource repository, installs that major, and rebuilds the WebUI. The rebuild keeps
   the WebUI's `.env` (its session secrets), so nobody gets logged out. A stamp file,
-  `/usr/lib/node_modules/open5gs/.obcell-build`, records the Open5GS and Node.js versions and
-  the npm overrides the WebUI was built with (`open5gs 2.8.0 node 26 jwa@1.4.2`). A box moves
+  `/usr/lib/node_modules/open5gs/.obcell-build`, records the Open5GS and Node.js versions, the
+  npm overrides and the upstream patches the WebUI was built with
+  (`open5gs 2.8.0 node 26 jwa@1.4.2 +1a461d63 +78cb3cb0 +fe001033`). A box moves
   up from Node.js 24 the same way, with `site.yml` alone. If the WebUI doesn't answer after its
   restart, `site.yml` fails.
 - **MongoDB holds the data**, and a newer server can't start on files from two majors back.
