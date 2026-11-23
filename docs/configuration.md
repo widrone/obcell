@@ -75,7 +75,8 @@ profiles are seeded on a fresh install.
   intercom-manager `5faf97e`, intercom-frontend `1009edc`, srsRAN_4G `release_23_11`.
 - **Packages:**
   - Open5GS 2.8.0 from `ppa:open5gs/latest`.
-  - Node 24 (NodeSource, `nodejs_major`), which builds and runs the Open5GS WebUI.
+  - Node 26 (NodeSource, `nodejs_major`), which builds and runs the Open5GS WebUI, with
+    `jwa` pinned to 1.4.2 (`open5gs_webui_npm_overrides`, see [upgrades.md](upgrades.md)).
   - MongoDB 8.0 (`mongodb_version`) on every release (the 24.04 build on 26.04, see
     [ubuntu-releases.md](ubuntu-releases.md)).
   - LimeSuite 23.11: from `ppa:myriadrf/drivers` on 22.04, from the Ubuntu archive on 24.04+.

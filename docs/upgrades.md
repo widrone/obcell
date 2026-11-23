@@ -1,26 +1,31 @@
 # Upgrading MongoDB and Node.js on an existing Obcell
 
-New Obcells install MongoDB 8.0 and Node.js 24 on every Ubuntu release. Obcells built
+New Obcells install MongoDB 8.0 and Node.js 26 on every Ubuntu release. Obcells built
 before 2026-11 on Ubuntu 22.04 run MongoDB 6.0 and Node.js 20, both past end of life. This page
 moves such a box to the current versions without losing the subscribers (the SIM keys).
 
 | Component | Old | New | End of life of the new one |
 |---|---|---|---|
 | MongoDB (the Open5GS subscriber database) | 6.0 (EOL 2025-07-31) | 8.0 | 2029-10-31 |
-| Node.js (runs the Open5GS WebUI) | 20 (EOL 2026-04-30) | 24 | 2028-04-30 |
+| Node.js (runs the Open5GS WebUI) | 20 (EOL 2026-04-30), 24 | 26 | 2029-04-30 |
 
-Node.js 26 (LTS since 2026-10) was tried too. The WebUI builds on it, but crashes at start:
-a dependency of `jsonwebtoken` (`buffer-equal-constant-time`) uses `SlowBuffer`, which newer
-Node.js removed. Node.js 22 works, but its support ends in 2027-04. See
-[task 014](tasks/014-webui-node26.md).
+The WebUI (Open5GS v2.8.0) runs on Node.js 26 only with one dependency moved: its lockfile has
+`jwa` 1.4.1, which loads `buffer-equal-constant-time`, which reads `SlowBuffer`, which Node.js 25
+removed, so the WebUI crashes at start. `jwa` 1.4.2 is in the range the WebUI's `jws` asks for
+and uses `crypto.timingSafeEqual` instead. The build applies it as an npm override,
+`open5gs_webui_npm_overrides: {jwa: "1.4.2"}` in `group_vars/all/main.yml`. Remove it when an
+Open5GS release locks `jwa` 1.4.2 or newer. Node.js 24 also runs the build without the pin
+([task 014](tasks/014-webui-node26.md)).
 
 ## What site.yml does, and what it leaves to upgrade.yml
 
 - **Node.js has no data**, so `site.yml` moves a box to `nodejs_major` by itself. It switches
   the NodeSource repository, installs that major, and rebuilds the WebUI. The rebuild keeps
   the WebUI's `.env` (its session secrets), so nobody gets logged out. A stamp file,
-  `/usr/lib/node_modules/open5gs/.obcell-build`, records which Node.js and Open5GS versions
-  the WebUI was built with.
+  `/usr/lib/node_modules/open5gs/.obcell-build`, records the Open5GS and Node.js versions and
+  the npm overrides the WebUI was built with (`open5gs 2.8.0 node 26 jwa@1.4.2`). A box moves
+  up from Node.js 24 the same way, with `site.yml` alone. If the WebUI doesn't answer after its
+  restart, `site.yml` fails.
 - **MongoDB holds the data**, and a newer server can't start on files from two majors back.
   So `site.yml` keeps whatever series a box already runs, and prints
   `MongoDB 6.0 is installed and the playbook wants 8.0 ... run upgrade.yml`. Only
@@ -59,9 +64,11 @@ when nobody needs the cell or the WebUI; the core loses its database for a few s
    ansible-playbook site.yml --limit <host>
    ```
 
-   Expected in the dry run: the NodeSource repository (`node_20.x` → `node_24.x`),
-   `Node.js 24 would come from the new repository`, `WebUI would be rebuilt`, and the
-   build stamp. Nothing else should change.
+   Expected in the dry run: the NodeSource repository (e.g. `node_20.x` → `node_26.x`),
+   `Node.js 26 would come from the new repository`, `WebUI would be rebuilt`, and the
+   build stamp. Nothing else should change. On Ubuntu, apt's `needrestart` restarts the old
+   WebUI as soon as the new Node.js is in; a build without the `jwa` pin then crash-loops for
+   the minute until the rebuild replaces it. That is expected.
 5. **Check:**
 
    ```bash

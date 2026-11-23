@@ -113,14 +113,15 @@ back with `reset-old`.
 
 ```bash
 tests/lxd/upgrade-smoke.sh 22.04 seed          # 5 more subscribers with random keys; saves the reference dump
-tests/lxd/upgrade-smoke.sh 22.04 route-a 24    # upgrade.yml in place, site.yml (Node 24), verify.yml
+tests/lxd/upgrade-smoke.sh 22.04 route-a 26    # upgrade.yml in place, site.yml (Node 26), verify.yml
 tests/lxd/upgrade-smoke.sh 22.04 reset-old     # back to MongoDB 6.0 + Node 20 with the reference data
-tests/lxd/upgrade-smoke.sh 22.04 route-b 24    # backup, wipe, fresh MongoDB, mongorestore --drop, site.yml
+tests/lxd/upgrade-smoke.sh 22.04 route-b 26    # backup, wipe, fresh MongoDB, mongorestore --drop, site.yml
 tests/lxd/upgrade-smoke.sh 22.04 webui 26      # only move Node.js (WebUI rebuild)
 ```
 
 Each run ends with `STATE` lines: package versions, FCV, apt repositories, a fingerprint of
-the whole `open5gs` database (`accounts=1 subscribers=6 sha256=…`) and a WebUI login that
+the whole `open5gs` database (`accounts=1 subscribers=6 sha256=…`), the WebUI's `jwa`
+version, and a WebUI login that
 lists the subscribers through the WebUI's API. The fingerprint must match the one `seed`
 printed. `OBCELL_TEST_MONGODB=7.0` stops route a at 7.0.
 
