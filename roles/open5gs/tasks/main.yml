@@ -127,7 +127,7 @@
     - name: Is the WebUI build current?
       ansible.builtin.set_fact:
         webui_build_wanted: >-
-          open5gs {{ open5gs_version }} node {{ nodejs_major }}{% for name, version in open5gs_webui_npm_overrides | dictsort %} {{ name }}@{{ version }}{% endfor %}
+          open5gs {{ open5gs_version }} node {{ nodejs_major }}{% for name, version in open5gs_webui_npm_overrides | dictsort %} {{ name }}@{{ version }}{% endfor %}{% for commit in open5gs_webui_patches %} +{{ commit }}{% endfor %}
         webui_build_have: >-
           {{ webui_stamp.stdout if webui_stamp.rc == 0 else
              'open5gs ' ~ open5gs_version ~ ' node ' ~ node_before_major }}
@@ -154,6 +154,21 @@
             dest: "{{ webui_tmp.path }}"
             remote_src: true
 
+        - name: Upstream WebUI fixes (patch files)
+          ansible.builtin.copy:
+            src: "webui-{{ item }}.patch"
+            dest: "{{ webui_tmp.path }}/webui-{{ item }}.patch"
+            mode: "0644"
+          loop: "{{ open5gs_webui_patches }}"
+
+        # git apply is all or nothing and has no fuzz: a patch that doesn't fit stops the build.
+        - name: Upstream WebUI fixes applied
+          ansible.builtin.command:
+            argv: [git, apply, "{{ webui_tmp.path }}/webui-{{ item }}.patch"]
+            chdir: "{{ webui_tmp.path }}/open5gs-{{ open5gs_version }}"
+          loop: "{{ open5gs_webui_patches }}"
+          changed_when: true
+
         # open5gs_webui_npm_overrides go into package.json, and the lockfile is re-resolved
         # for them (metadata only, no install scripts) so that npm clean-install accepts it.
         - name: npm clean-install && npm run build
@@ -171,14 +186,14 @@
             chdir: "{{ webui_tmp.path }}/open5gs-{{ open5gs_version }}/webui"
 
         # A rebuild replaces the old tree but keeps its .env (the WebUI's session and JWT
-        # secrets), so nobody is logged out.
+        # secrets), so nobody is logged out. Only its owner may read it (the WebUI runs as root).
         - name: Install to /usr/lib/node_modules/open5gs
           ansible.builtin.shell: |
             set -e
             new={{ webui_tmp.path }}/open5gs-{{ open5gs_version }}/webui
             dst=/usr/lib/node_modules/open5gs
             mkdir -p /usr/lib/node_modules
-            if [ -f "$dst/.env" ]; then cp -p "$dst/.env" "$new/.env"; fi
+            if [ -f "$dst/.env" ]; then cp -p "$dst/.env" "$new/.env"; chmod 0600 "$new/.env"; fi
             rm -rf "$dst.old"
             if [ -d "$dst" ]; then mv "$dst" "$dst.old"; fi
             mv "$new" "$dst"

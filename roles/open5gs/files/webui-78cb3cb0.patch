@@ -1,0 +1,80 @@
+From 78cb3cb004d798f226ead87f3600a31387c36975 Mon Sep 17 00:00:00 2001
+From: Soma Aishwarya <soma@digiscrypt.com>
+Date: Sat, 14 Nov 2026 14:26:10 +0530
+Subject: [PATCH] webui: enforce account roles in the Account REST API
+
+/api/db/Account is served by express-restify-mongoose behind the JWT
+check only, so the rules the account pages apply exist only in the
+browser. A user-role token could create an admin account, overwrite
+another account's hash and salt (passwords are hashed client-side),
+change its own roles or username, delete accounts, and read password
+hashes through the select, distinct and query options despite
+select:false on hash and salt.
+
+Only an admin may now create, delete or edit other accounts. A
+non-admin may update only their own account, and only hash and salt
+are kept from the body, since the edit form posts the whole document
+back. Client query options are ignored on account reads; the UI sends
+none.
+---
+ webui/server/routes/db.js | 42 ++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 41 insertions(+), 1 deletion(-)
+
+diff --git a/webui/server/routes/db.js b/webui/server/routes/db.js
+index 70570886cc..2d6cf44810 100644
+--- a/webui/server/routes/db.js
++++ b/webui/server/routes/db.js
+@@ -19,11 +19,51 @@ restify.serve(router, Profile, {
+   version: ''
+ });
+ 
++/*
++ * The UI only offers account management to admins, but these routes accept
++ * any valid token, so enforce the same rules here: only an admin may create,
++ * delete or edit other accounts, and a non-admin may only change the
++ * password (hash/salt) of their own account. The edit form posts the whole
++ * document back, so a non-admin's other fields (roles, username) are dropped
++ * rather than rejected.
++ */
++const isAdmin = req =>
++  Array.isArray(req.user.roles) && req.user.roles.indexOf('admin') !== -1;
++
++const requireAdmin = (req, res, next) =>
++  isAdmin(req) ? next() : res.sendStatus(403);
++
+ const Account = require('../models/account');
+ restify.serve(router, Account, {
+   prefix: '',
+   version: '',
+-  idProperty: 'username'
++  idProperty: 'username',
++  preRead: (req, res, next) => {
++    /*
++     * hash and salt are select:false in the schema, but the select,
++     * distinct, query and sort options can still reach them. The UI
++     * does not send any of these for accounts.
++     */
++    req.erm.query = {};
++    next();
++  },
++  preCreate: requireAdmin,
++  preUpdate: (req, res, next) => {
++    if (isAdmin(req))
++      return next();
++
++    if (req.params.id !== req.user.username)
++      return res.sendStatus(403);
++
++    const body = {};
++    ['hash', 'salt'].forEach(key => {
++      if (req.body && req.body[key] !== undefined)
++        body[key] = req.body[key];
++    });
++    req.body = body;
++    next();
++  },
++  preDelete: requireAdmin
+ });
+ 
+ module.exports = router;
+\ No newline at end of file

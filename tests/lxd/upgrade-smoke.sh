@@ -10,6 +10,7 @@
 #   tests/lxd/upgrade-smoke.sh [RELEASE] route-b NODE    backup, wipe, fresh MongoDB, mongorestore --drop, site.yml + verify.yml
 #   tests/lxd/upgrade-smoke.sh [RELEASE] reset-old       back to MongoDB 6.0 + Node 20 with the reference data
 #   tests/lxd/upgrade-smoke.sh [RELEASE] webui NODE      only move Node.js (rebuilds the WebUI), then state
+#   tests/lxd/upgrade-smoke.sh [RELEASE] roles           WebUI account-role checks (tests/lxd/webui-roles.py)
 # RELEASE defaults to 22.04 (the only release that has MongoDB 6.0/7.0 packages).
 # Every phase prints "TIME <phase> <seconds>"; `state` prints "STATE ..." lines to compare.
 set -euo pipefail
@@ -65,6 +66,7 @@ webui_login() {
 
 state() {
   echo "STATE versions $(cx "dpkg-query -W -f='\${Package}=\${Version} ' mongodb-org-server nodejs; echo; cat /usr/lib/node_modules/open5gs/.obcell-build 2>/dev/null")"
+  echo "STATE webui-env-mode $(cx 'stat -c %a /usr/lib/node_modules/open5gs/.env 2>/dev/null || echo none')"
   echo "STATE webui-jwa $(cx "cd /usr/lib/node_modules/open5gs 2>/dev/null && find node_modules -path '*/jwa/package.json' | xargs -r grep -h '\"version\"' | tr -d ' ,\"' | tr '\n' ' '")"
   echo "STATE fcv $(cx "HOME=/root mongosh --quiet --eval 'db.adminCommand({getParameter: 1, featureCompatibilityVersion: 1}).featureCompatibilityVersion.version'")"
   echo "STATE repos $(cx 'ls /etc/apt/sources.list.d/ | grep -E "mongodb|nodesource" | tr "\n" " "')"
@@ -136,5 +138,9 @@ case $CMD in
     [ -n "$NODE" ] || die "webui needs the Node.js major, e.g. 26"
     timed webui play site.yml --tags open5gs -e nodejs_major="$NODE"
     state ;;
-  *) die "unknown command '$CMD' (seed|state|route-a NODE|route-b NODE|reset-old|webui NODE)" ;;
+  roles)
+    # A user-role account must not be able to do admin things (task 015). The test
+    # containers' WebUI admin password is the default one.
+    lxc exec "$C" -- python3 -I - 1423 < tests/lxd/webui-roles.py ;;
+  *) die "unknown command '$CMD' (seed|state|route-a NODE|route-b NODE|reset-old|webui NODE|roles)" ;;
 esac

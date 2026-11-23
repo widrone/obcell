@@ -56,6 +56,12 @@ nodejs_major: 26                                # NodeSource; builds and runs th
 # The jwa 1.4.1 that WebUI v2.8.0 locks loads buffer-equal-constant-time, which crashes on
 # Node.js 25+ (no SlowBuffer); 1.4.2 fits jws's range and uses crypto.timingSafeEqual.
 open5gs_webui_npm_overrides: {jwa: "1.4.2"}
+# Upstream WebUI commits newer than open5gs_version, applied to its source before the build
+# (roles/open5gs/files/webui-<commit>.patch). Drop each one once open5gs_version includes it.
+#   1a461d63  .env (session and JWT secrets) readable by its owner only
+#   78cb3cb0  the Account API enforces account roles on the server, not only in the browser
+#   fe001033  ... checked against the stored account, so old tokens lose rights a demotion removes
+open5gs_webui_patches: ["1a461d63", "78cb3cb0", "fe001033"]
 # New boxes get this; a box that has an older series keeps it until upgrade.yml (docs/upgrades.md).
 mongodb_version: "8.0"
 # MongoDB publishes its server per Ubuntu release. For releases it doesn't cover yet
