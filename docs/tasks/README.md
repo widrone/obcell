@@ -18,6 +18,7 @@ Open work, one file per task, written so that a person or an agent can pick it u
 | 012 | [OwnTracks from the open internet (Funnel), deferred](012-owntracks-funnel.md) | reference Obcell | **yes** (tailnet policy; deferred by the owner) | 011 |
 | 013 | [Upgrade MongoDB and Node.js on the reference Obcell](013-reference-eol-upgrade.md) | reference Obcell | **yes** (its subscriber database) | 009 |
 | 014 | [Run the Open5GS WebUI on Node.js 26](014-webui-node26.md) | test machine | no | 009 |
+| 015 | [Upstream WebUI access-control fixes, private .env](015-webui-upstream-fixes.md) | test machine, reference Obcell | **yes** (source choice, apply) | 014 |
 
 ## Format
 
