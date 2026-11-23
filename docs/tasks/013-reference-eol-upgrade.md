@@ -1,7 +1,7 @@
 ---
 id: 013
 title: Upgrade MongoDB and Node.js on the reference Obcell
-status: todo          # all checks pass (2026-11-23); waiting for the owner's WebUI login
+status: done
 where: reference Obcell
 needs_human: yes      # touches the live Obcell's subscriber database; needs an explicit OK in the conversation
 depends_on: [009]
@@ -39,8 +39,7 @@ the WebUI login unchanged, and `site.yml --check --diff` back at `changed=0`.
 
 - [x] `mongod --version` is 8.0.x and the FCV is 8.0.
 - [x] `node --version` is the `nodejs_major` from `group_vars/all/main.yml`.
-- [ ] The subscriber and account counts are the same as before, and the WebUI login works.
-      (Counts and the whole database: same. Login: waiting for the owner, see Findings.)
+- [x] The subscriber and account counts are the same as before, and the WebUI login works.
 - [x] `verify.yml` passes and `site.yml --check --diff` reports `changed=0`.
 
 ## Findings
@@ -85,3 +84,7 @@ the WebUI build).
 - No scripted WebUI login on this box: its admin password isn't in `secrets/` (the account was
   made by hand before the automation). The database and the `.env` are unchanged, so the
   existing password and sessions still work; the owner's browser login closes the last box.
+- 2026-11-23, after the upgrade: the owner logged in to the WebUI through the tailnet name and
+  it works. The `.local` name didn't open from their computer, most likely their computer's
+  mDNS/DNS setup: on the box itself the `.local` front door answers as before (302 to the
+  login, in both snapshots).
