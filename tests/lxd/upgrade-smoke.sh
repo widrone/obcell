@@ -65,6 +65,7 @@ webui_login() {
 
 state() {
   echo "STATE versions $(cx "dpkg-query -W -f='\${Package}=\${Version} ' mongodb-org-server nodejs; echo; cat /usr/lib/node_modules/open5gs/.obcell-build 2>/dev/null")"
+  echo "STATE webui-jwa $(cx "cd /usr/lib/node_modules/open5gs 2>/dev/null && find node_modules -path '*/jwa/package.json' | xargs -r grep -h '\"version\"' | tr -d ' ,\"' | tr '\n' ' '")"
   echo "STATE fcv $(cx "HOME=/root mongosh --quiet --eval 'db.adminCommand({getParameter: 1, featureCompatibilityVersion: 1}).featureCompatibilityVersion.version'")"
   echo "STATE repos $(cx 'ls /etc/apt/sources.list.d/ | grep -E "mongodb|nodesource" | tr "\n" " "')"
   echo "STATE data $(fingerprint)"

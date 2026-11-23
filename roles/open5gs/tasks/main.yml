@@ -126,7 +126,8 @@
 
     - name: Is the WebUI build current?
       ansible.builtin.set_fact:
-        webui_build_wanted: "open5gs {{ open5gs_version }} node {{ nodejs_major }}"
+        webui_build_wanted: >-
+          open5gs {{ open5gs_version }} node {{ nodejs_major }}{% for name, version in open5gs_webui_npm_overrides | dictsort %} {{ name }}@{{ version }}{% endfor %}
         webui_build_have: >-
           {{ webui_stamp.stdout if webui_stamp.rc == 0 else
              'open5gs ' ~ open5gs_version ~ ' node ' ~ node_before_major }}
@@ -153,8 +154,19 @@
             dest: "{{ webui_tmp.path }}"
             remote_src: true
 
+        # open5gs_webui_npm_overrides go into package.json, and the lockfile is re-resolved
+        # for them (metadata only, no install scripts) so that npm clean-install accepts it.
         - name: npm clean-install && npm run build
-          ansible.builtin.shell: npm clean-install && npm run build
+          ansible.builtin.shell: |
+            set -e
+            {% for name, version in open5gs_webui_npm_overrides | dictsort %}
+            npm pkg set {{ ('overrides.' ~ name ~ '=' ~ version) | quote }}
+            {% endfor %}
+            {% if open5gs_webui_npm_overrides %}
+            npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+            {% endif %}
+            npm clean-install
+            npm run build
           args:
             chdir: "{{ webui_tmp.path }}/open5gs-{{ open5gs_version }}/webui"
 

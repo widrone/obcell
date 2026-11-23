@@ -5,3 +5,13 @@
   loop: [nrf, amf, smf, upf, mme]
 - name: Restart open5gs-webui
   ansible.builtin.systemd: {name: open5gs-webui, state: restarted, daemon_reload: true}
+# A WebUI that crashes at start (e.g. on a Node.js it doesn't support) is restarted by
+# systemd forever; fail the run instead.
+- name: WebUI answers after the restart
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ open5gs_webui_port }}/api/auth/csrf"
+  register: webui_up
+  until: webui_up.status == 200
+  retries: 30
+  delay: 2
+  listen: Restart open5gs-webui

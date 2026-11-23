@@ -52,6 +52,10 @@ open5gs_webui_enabled: true
 open5gs_webui_port: 9999                        # local only (127.0.0.1); browsers use the front door below
 open5gs_webui_https_port: 9443                  # Caddy + Authelia in front of the WebUI
 nodejs_major: 24                                # NodeSource; runs the WebUI (26 crashes it, docs/upgrades.md)
+# npm "overrides" (package -> version) put into the WebUI's package.json before its build.
+# The jwa 1.4.1 that WebUI v2.8.0 locks loads buffer-equal-constant-time, which crashes on
+# Node.js 25+ (no SlowBuffer); 1.4.2 fits jws's range and uses crypto.timingSafeEqual.
+open5gs_webui_npm_overrides: {jwa: "1.4.2"}
 # New boxes get this; a box that has an older series keeps it until upgrade.yml (docs/upgrades.md).
 mongodb_version: "8.0"
 # MongoDB publishes its server per Ubuntu release. For releases it doesn't cover yet
