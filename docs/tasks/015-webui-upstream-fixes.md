@@ -1,7 +1,7 @@
 ---
 id: 015
 title: Pick up the upstream WebUI access-control fixes, and keep the WebUI's .env private
-status: in-progress
+status: done
 where: test machine, reference Obcell
 needs_human: yes      # which upstream source to build from (a release, a commit or patches); applying it on the reference Obcell
 depends_on: [014]
@@ -144,3 +144,6 @@ differs only in load, uptime and temperature (69 °C → 86 °C right after the 
 
 On this 22.04 box the old WebUI wasn't restarted when Node.js 26 came in, so there was no
 crash-loop during the move (unlike the 24.04 test container in task 014).
+
+**2026-11-24, after the rebuild:** the owner logged in to the WebUI over the tailnet and opened
+the Account page and a subscriber: both work.
