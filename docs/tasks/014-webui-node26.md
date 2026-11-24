@@ -105,3 +105,6 @@ holds the 22.04, 24.04 and 26.04 containers.
 
 The reference Obcell is still on Node.js 24. Moving it is a `site.yml` run (about 3 minutes
 of WebUI rebuild) with the owner's OK; the preview is above.
+
+**2026-11-24:** the reference Obcell runs Node.js 26.13.1, moved together with the
+[task 015](015-webui-upstream-fixes.md) patches (findings there).

@@ -53,8 +53,7 @@ Found during [task 014](014-webui-node26.md) (2026-11-23).
 
 - [x] A `user`-role account gets a refusal on `POST /api/db/Account` in a test container.
 - [x] The WebUI's `.env` is `0600` after `site.yml`, and existing logins still work.
-- [ ] The matrix passes; the reference Obcell has it (with the human's OK), `changed=0` after.
-      (Matrix: passes, see Findings. Reference Obcell: waiting for the human's OK.)
+- [x] The matrix passes; the reference Obcell has it (with the human's OK), `changed=0` after.
 
 ## Findings
 
@@ -114,3 +113,34 @@ WebUI in this run), then `upgrade-smoke.sh <release> roles` on each:
 
 Left: the reference Obcell, with the human's OK. One `site.yml` run moves it to Node.js 26 and
 the patched WebUI together (the preview above).
+
+### 2026-11-24: applied on the reference Obcell, main at a5b2f05
+
+Asked for by the owner in the conversation, together with the Node.js 26 move from
+[task 014](014-webui-node26.md). That move had stopped on 2026-11-23 before changing anything:
+the box's Ubuntu country mirror refused connections, and apt couldn't update. The mirror answered
+again (it failed one probe and passed the next five). The cell was off air and stayed that way.
+
+| Step | Result | Time |
+|---|---|---|
+| `site.yml --check --diff` | `changed=4`: NodeSource `node_24.x` → `node_26.x`, Node.js 24.22.3 → 26.x, WebUI `open5gs 2.8.0 node 24` → `… node 26 jwa@1.4.2 +1a461d63 +78cb3cb0 +fe001033`, the stamp | |
+| `site.yml` | `changed=12`, `failed=0`; all three patches applied; the new handler needed one retry while the WebUI started | 3 min 17 s |
+| `verify.yml` | `changed=0`, `failed=0` | |
+| `site.yml --check --diff` | `changed=0` | |
+
+| | Before | After |
+|---|---|---|
+| Node.js | 24.22.3 | 26.13.1 |
+| Build stamp | `open5gs 2.8.0 node 24` | `open5gs 2.8.0 node 26 jwa@1.4.2 +1a461d63 +78cb3cb0 +fe001033` |
+| WebUI `.env` | `644` | `600`, same content (same hash) |
+| `open5gs` database | accounts=1 subscribers=1 sha256=46b4acc3ce1d0f01 | the same |
+| MongoDB | 8.0.38, FCV 8.0 | the same |
+| WebUI | answers, front door 302 | the same; 0 restarts, clean journal |
+| gNB | inactive, disabled | inactive, disabled |
+
+The whole-box snapshot (services, containers, web front doors, probes, alerts, radio feed,
+Intercom, Open Live, on-air control, OwnTracks) is identical before and after. `obcell status`
+differs only in load, uptime and temperature (69 °C → 86 °C right after the build).
+
+On this 22.04 box the old WebUI wasn't restarted when Node.js 26 came in, so there was no
+crash-loop during the move (unlike the 24.04 test container in task 014).
