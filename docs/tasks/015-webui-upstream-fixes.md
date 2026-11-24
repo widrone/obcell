@@ -145,5 +145,5 @@ differs only in load, uptime and temperature (69 °C → 86 °C right after the 
 On this 22.04 box the old WebUI wasn't restarted when Node.js 26 came in, so there was no
 crash-loop during the move (unlike the 24.04 test container in task 014).
 
-**2026-11-24, after the rebuild:** the owner logged in to the WebUI over the tailnet and opened
-the Account page and a subscriber: both work.
+**2026-11-24, after the rebuild:** the owner logged in to the WebUI and it works. (The admin
+Account page itself was checked through the API in the test containers, `admin_create_list_delete`.)
